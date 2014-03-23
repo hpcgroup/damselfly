@@ -8,8 +8,13 @@
 #include <sys/time.h>
 #include <cfloat>
 
+#ifndef STATIC_ROUTING
 #define STATIC_ROUTING 1
+#endif
+
+#ifndef DIRECT_ROUTING
 #define DIRECT_ROUTING 1
+#endif
 
 using namespace std;
 
@@ -31,6 +36,8 @@ using namespace std;
 #define BLUE_BW 12288
 
 #define PCI_BW 16384
+
+#define PACKET_SIZE 16384
 
 #define MAX(a,b) (((a)>(b))?(a):(b))
 #define MIN(a,b) (((a)<(b))?(a):(b))
@@ -78,6 +85,9 @@ inline void addLoads();
 inline void addPathsToMsgs();
 inline void addToPath(vector< Path > & paths, Coords src, int srcNum, Coords &dst, int loc1, int loc2);
 inline void addFullPaths(vector< Path > & paths, Coords src, int srcNum, Coords &dst, int dstNum);
+inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum, Path & p);
+inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum, Path &p);
+inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum, Path &p);
 
 //we use a simple dimensional ordered ranking for Aries - nothing to do with the
 //actual ranking; used only for data management
@@ -273,6 +283,7 @@ void model() {
     }
   }
   printf("******************Summary*****************\n");
+  printf("STATIC_ROUTING %d DIRECT_ROUTING %d\n",STATIC_ROUTING,DIRECT_ROUTING);
   printf("maxLinkTime %.2f s\n",maxTimeLink);
   printf("maxPCITime %.2f s\n",maxTimePCI);
   printf("maxLoad %.2f MB -- minLoad %.2f MB\n",maxLoad,minLoad);
@@ -432,8 +443,148 @@ void addFullPaths(vector< Path > & paths, Coords src, int srcNum, Coords &dst, i
     }
   }
 }
-#endif //DIRECT_ROUTING
+#else // not using DIRECT_ROUTING
 
+inline void addLoads() {
+  srand(time(NULL));
+  float MB = 1024*1024;
+  float perPacket = PACKET_SIZE/MB;
+  int count = 0;
+  int printFreq = numMsgs/100;
+  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
+    count++;
+    if(count % printFreq == 0) {
+      printf("Modeling at msg num %d\n", count);
+    }
+    Msg &currmsg = *msgit;
+    Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
+    if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]
+      && src.coords[TIER3] == dst.coords[TIER3]) continue;
+
+    aries[currmsg.src].pciSO[currmsg.srcPCI] += currmsg.bytes;
+    aries[currmsg.dst].pciRO[currmsg.dstPCI] += currmsg.bytes;
+    int numPackets = currmsg.bytes/perPacket;
+    numPackets = MAX(1, numPackets);
+
+    for(int i = 0; i < numPackets; i++) {
+      Path p;
+      getRandomPath(src, currmsg.src, dst, currmsg.dst, p);
+      for(int j = 0; j < p.size(); j++) {
+        aries[p[j].aries].linksO[p[j].link] += perPacket;
+      }
+    }
+  }
+}
+
+inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum, Path & p) {
+  //same group
+  if(src.coords[TIER1] == dst.coords[TIER1]) {
+    int valiantNum = rand() % ariesPerGroup;
+    Coords valiantNode;
+    while(valiantNum == aries[srcNum].localRank) {
+      valiantNum = rand() % ariesPerGroup;
+    }
+    valiantNode.coords[TIER1] = src.coords[TIER1];
+    valiantNode.coords[TIER2] = valiantNum / maxCoords.coords[TIER3];
+    valiantNode.coords[TIER3] = valiantNum % maxCoords.coords[TIER3];
+    coordstoAriesRank(valiantNum, valiantNode);
+    addIntraPath(src, srcNum, valiantNode, valiantNum, p);
+    if(valiantNum != dstNum) {
+      addIntraPath(valiantNode, valiantNum, dst, dstNum, p);
+    }
+  } else { //different groups
+    int valiantNum = rand() % maxCoords.coords[TIER1];
+    Coords valiantNode;
+    bool noValiant = false;
+    while(valiantNum == src.coords[TIER1]) {
+      valiantNum = rand() % ariesPerGroup;
+    }
+    if(valiantNum == dst.coords[TIER1]) {
+      noValiant = true;
+      valiantNode = dst;
+      valiantNum = dstNum;
+    } else {
+      valiantNode.coords[TIER1] = valiantNum;
+      valiantNum = rand() % ariesPerGroup;
+      valiantNode.coords[TIER2] = valiantNum / maxCoords.coords[TIER3];
+      valiantNode.coords[TIER3] = valiantNum % maxCoords.coords[TIER3];
+      coordstoAriesRank(valiantNum, valiantNode);
+    }
+
+    addInterPath(src, srcNum, valiantNode, valiantNum, p);
+
+    if(!noValiant) {
+      addInterPath(valiantNode, valiantNum, dst, dstNum, p);
+    }
+  }
+}
+
+inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum, Path &p) {
+  Hop h;
+  if(src.coords[TIER2] == dst.coords[TIER2]) { //if use 1 GREEN
+    h.aries = srcNum;
+    h.link = dst.coords[TIER3];
+    p.push_back(h);
+  } else if (src.coords[TIER3] == dst.coords[TIER3]) { //if use 1 BLACK
+    h.aries = srcNum;
+    h.link = BLACK_START + dst.coords[TIER2];
+    p.push_back(h);
+  } else { //two paths, choose 1
+    if(rand() % 2) { //first GREEN, then BLACK
+      h.aries = srcNum;
+      h.link = dst.coords[TIER3];
+      p.push_back(h);
+      src.coords[TIER3] = dst.coords[TIER3];
+      coordstoAriesRank(srcNum, src);
+      h.aries = srcNum;
+      h.link = BLACK_START + dst.coords[TIER2];
+      p.push_back(h);
+    } else { //first BLACK, then GREEN
+      h.aries = srcNum;
+      h.link = BLACK_START + dst.coords[TIER2];
+      p.push_back(h);
+      src.coords[TIER2] = dst.coords[TIER2];
+      coordstoAriesRank(srcNum, src);
+      h.aries = srcNum;
+      h.link = dst.coords[TIER3];
+      p.push_back(h);
+    }
+  }
+}
+
+inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum, Path &p) {
+    Coords interNode;
+    int interNum;
+
+    int localConnection = dst.coords[TIER1] % ariesPerGroup;
+    if(localConnection == aries[srcNum].localRank) {
+      interNode = src;
+      interNum = srcNum;
+    } else {
+      interNode.coords[TIER1] = src.coords[TIER1];
+      interNode.coords[TIER2] = localConnection / maxCoords.coords[TIER3];
+      interNode.coords[TIER3] = localConnection % maxCoords.coords[TIER3];
+      coordstoAriesRank(interNum, interNode);
+      addIntraPath(src, srcNum, interNode, interNum, p);
+    }
+
+    //BLUE link
+    Hop h;
+    h.aries = interNum;
+    h.link = BLUE_START + dst.coords[TIER1]/ariesPerGroup;
+    p.push_back(h);
+
+    localConnection = src.coords[TIER1] % ariesPerGroup;
+    if(localConnection != aries[dstNum].localRank) {
+      interNode.coords[TIER1] = dst.coords[TIER1];
+      interNode.coords[TIER2] = localConnection % maxCoords.coords[TIER3];
+      interNode.coords[TIER3] = localConnection % maxCoords.coords[TIER3];
+      coordstoAriesRank(interNum, interNode);
+      addIntraPath(interNode, interNum, dst, dstNum, p);
+    }
+}
+
+#endif // not using DIRECT_ROUTING
 #endif // STATIC_ROUTING
 
 #if !STATIC_ROUTING
