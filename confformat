@@ -1,6 +1,2 @@
-#delta in nanosec
-#bw in GB/s
-#number of dimensions
-#dimensions
-#order in routing
-#num ranks
+256  //number of aries
+16 4 4 4 2 //dimensions
