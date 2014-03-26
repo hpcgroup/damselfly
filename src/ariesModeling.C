@@ -9,7 +9,7 @@
 #include <cfloat>
 
 #ifndef STATIC_ROUTING
-#define STATIC_ROUTING 1
+#define STATIC_ROUTING 0
 #endif
 
 #ifndef DIRECT_ROUTING
@@ -37,7 +37,11 @@ using namespace std;
 
 #define PCI_BW 16384
 
+#define CUTOFF_BW 1
+
 #define PACKET_SIZE 16384
+
+#define NUM_ITERS 10
 
 #define MAX(a,b) (((a)>(b))?(a):(b))
 #define MIN(a,b) (((a)<(b))?(a):(b))
@@ -68,6 +72,9 @@ typedef struct Msg {
   float bytes; //in MB
   float bw; //allocated
   vector< Path > paths;
+  vector< bool > expand;
+  vector< float > loads;
+  vector< float > allocated;
 } Msg;
 
 int numMsgs; // number of messages to be sent
@@ -88,6 +95,11 @@ inline void addFullPaths(vector< Path > & paths, Coords src, int srcNum, Coords 
 inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum, Path & p);
 inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum, Path &p);
 inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum, Path &p);
+inline void selectExpansionRequests(bool & expand);
+inline void markExpansionRequests();
+inline void updateMessageAndLinks();
+inline void computeSummary();
+inline void printStats();
 
 //we use a simple dimensional ordered ranking for Aries - nothing to do with the
 //actual ranking; used only for data management
@@ -201,6 +213,7 @@ int main(int argc, char**argv) {
     newmsg.dstPCI = coords[newmsg.dst].coords[NUM_LEVELS];
     coordstoAriesRank(newmsg.src, coords[newmsg.src]);
     coordstoAriesRank(newmsg.dst, coords[newmsg.dst]);
+    newmsg.bw = 0;
     msgs.push_back(newmsg);
     sum += newmsg.bytes;
   }
@@ -239,6 +252,36 @@ int main(int argc, char**argv) {
   delete[] coords;
 }
 
+inline void printStats() {
+  float maxLoad = 0, minLoad = FLT_MAX, maxPCI = 0, minPCI = FLT_MAX;
+  double totalLinkLoad = 0, totalPCILoad = 0;
+  for(int i = 0; i < numAries; i++) {
+    for(int j = 0; j < 4; j++) {
+      maxPCI = MAX(maxPCI, aries[i].pciSO[j]);
+      minPCI = MIN(minPCI, aries[i].pciSO[j]);
+      totalPCILoad += aries[i].pciSO[j];
+
+      maxPCI = MAX(maxPCI, aries[i].pciRO[j]);
+      minPCI = MIN(minPCI, aries[i].pciRO[j]);
+      totalPCILoad += aries[i].pciRO[j];
+    }
+
+    for(int j = 0; j < BLUE_END; j++) {
+      maxLoad = MAX(maxLoad, aries[i].linksO[j]);
+      minLoad = MIN(minLoad, aries[i].linksO[j]);
+      totalLinkLoad += aries[i].linksO[j];
+    }
+  }
+
+  long long totalLinks = numAries*(15+5+((numAries/ariesPerGroup) + (numAries % ariesPerGroup) ? 1 : 0));
+
+  printf("******************Summary*****************\n");
+  printf("STATIC_ROUTING %d DIRECT_ROUTING %d\n",STATIC_ROUTING,DIRECT_ROUTING);
+  printf("maxLoad %.2f MB -- minLoad %.2f MB\n",maxLoad,minLoad);
+  printf("maxPCI %.2f MB -- minPCI %.2f MB\n",maxPCI,minPCI);
+  printf("averageLinkLoad %.2lf averagePCILoad %.2lf\n", totalLinkLoad/totalLinks, totalPCILoad/(numAries*8));
+}
+
 #if STATIC_ROUTING
 /* for static routing, the linksO and pci(S/R)O stores the volumne of traffic that passes
 through them in MB; linksB and pci(S/R)B stores the total bandwidth in MB */
@@ -247,7 +290,7 @@ void model() {
   //initialize upper bounds
   for(int i = 0; i < numAries; i++) {
     aries[i].localRank = coords[i].coords[TIER2] * maxCoords.coords[TIER3] + coords[i].coords[TIER3];
-    for(int j = 0; j < 32; j++) {
+    for(int j = 0; j < BLUE_END; j++) {
       if(j < GREEN_END) aries[i].linksB[j] = GREEN_BW;
       else if(j < BLACK_END) aries[i].linksB[j] = BLACK_BW;
       else aries[i].linksB[j] = BLUE_BW;
@@ -260,34 +303,7 @@ void model() {
 
   //get initial counts
   addLoads();
-
-  float time, maxTimePCI = 0, maxTimeLink = 0, maxLoad = 0, minLoad = FLT_MAX, maxPCI = 0, minPCI = FLT_MAX;
-  for(int i = 0; i < numAries; i++) {
-    for(int j = 0; j < 4; j++) {
-      time = aries[i].pciSO[j]/aries[i].pciSB[j];
-      maxTimePCI = MAX(maxTimePCI, time);
-      maxPCI = MAX(maxPCI, aries[i].pciSO[j]);
-      minPCI = MIN(minPCI, aries[i].pciSO[j]);
-
-      time = aries[i].pciRO[j]/aries[i].pciRB[j];
-      maxTimePCI = MAX(maxTimePCI, time);
-      maxPCI = MAX(maxPCI, aries[i].pciRO[j]);
-      minPCI = MIN(minPCI, aries[i].pciRO[j]);
-    }
-
-    for(int j = 0; j < BLUE_END; j++) {
-      time = aries[i].linksO[j]/aries[i].linksB[j];
-      maxTimeLink = MAX(maxTimeLink, time);
-      maxLoad = MAX(maxLoad, aries[i].linksO[j]);
-      minLoad = MIN(minLoad, aries[i].linksO[j]);
-    }
-  }
-  printf("******************Summary*****************\n");
-  printf("STATIC_ROUTING %d DIRECT_ROUTING %d\n",STATIC_ROUTING,DIRECT_ROUTING);
-  printf("maxLinkTime %.2f s\n",maxTimeLink);
-  printf("maxPCITime %.2f s\n",maxTimePCI);
-  printf("maxLoad %.2f MB -- minLoad %.2f MB\n",maxLoad,minLoad);
-  printf("maxPCI %.2f MB -- minPCI %.2f MB\n",maxPCI,minPCI);
+  printStats();
 }
 
 #if DIRECT_ROUTING
@@ -296,26 +312,27 @@ inline void addLoads() {
   addPathsToMsgs();
   for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
     Msg &currmsg = *msgit;
-    if(currmsg.paths.size()) {
-      aries[currmsg.src].pciSO[currmsg.srcPCI] += currmsg.bytes;
-      aries[currmsg.dst].pciRO[currmsg.dstPCI] += currmsg.bytes;
-      float perPath = currmsg.bytes/currmsg.paths.size();
-      for(int i = 0; i < currmsg.paths.size(); i++) {
-        for(int j = 0; j < currmsg.paths[i].size(); j++) {
-          aries[currmsg.paths[i][j].aries].linksO[currmsg.paths[i][j].link] += perPath;
-        }
+    aries[currmsg.src].pciSO[currmsg.srcPCI] += currmsg.bytes;
+    aries[currmsg.dst].pciRO[currmsg.dstPCI] += currmsg.bytes;
+    float perPath = currmsg.bytes/currmsg.paths.size();
+    for(int i = 0; i < currmsg.paths.size(); i++) {
+      for(int j = 0; j < currmsg.paths[i].size(); j++) {
+        aries[currmsg.paths[i][j].aries].linksO[currmsg.paths[i][j].link] += perPath;
       }
     }
   }
 }
 
 inline void addPathsToMsgs() {
-  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
+  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); ) {
     Msg &currmsg = *msgit;
     Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
     //if same aries, continue
     if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]
-      && src.coords[TIER3] == dst.coords[TIER3]) continue;
+      && src.coords[TIER3] == dst.coords[TIER3]) {
+      msgit = msgs.erase(msgit );
+      continue;
+    }
 
     //in the same lowest tier - direct connection
     if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]) {
@@ -336,6 +353,7 @@ inline void addPathsToMsgs() {
     } else {
       addFullPaths(currmsg.paths, src, currmsg.src, dst, currmsg.dst);
     }
+    msgit++;
   }
 }
 
@@ -593,29 +611,205 @@ void model() {
   //initialize upper bounds
   for(int i = 0; i < numAries; i++) {
     aries[i].localRank = coords[i].coords[TIER2] * maxCoords.coords[TIER3] + coords[i].coords[TIER3];
-    for(int j = 0; j < 32; j++) {
-      if(j < GREEN_END) aries[i].linksB[j] = GREEN_BW;
-      else if(j < BLACK_END) aries[i].linksB[j] = BLACK_BW;
-      else aries[i].linksB[j] = BLUE_BW;
+    for(int j = 0; j < BLUE_END; j++) {
+      if(j < GREEN_END) aries[i].linksB[j] = GREEN_BW/(float)NUM_ITERS;
+      else if(j < BLACK_END) aries[i].linksB[j] = BLACK_BW/(float)NUM_ITERS;
+      else aries[i].linksB[j] = BLUE_BW/(float)NUM_ITERS;
     }
     for(int j = 0; j < 4; j++) {
-      aries[i].pciSB[j] = PCI_BW;
-      aries[i].pciRB[j] = PCI_BW;
+      aries[i].pciSB[j] = PCI_BW/(float)NUM_ITERS;
+      aries[i].pciRB[j] = PCI_BW/(float)NUM_ITERS;
     }
   }
 
-  // perform static routing
+  // intial set up
   addPathsToMsgs();
+  markExpansionRequests();
+  updateMessageAndLinks();
+
+  bool expand = true;
+
+  int iter;
+  for(iter = 0; iter < 50 && expand; iter++) {
+    printf("In iteration %d\n", iter);
+    fflush(stdout);
+    expand = false;
+
+    //reset needed to zero
+    for(int i = 0; i < numAries; i++) {
+      for(int j = 0; j < 4; j++) {
+        aries[i].pciSO[j] = 0;
+        aries[i].pciRO[j] = 0;
+      }
+      for(int j = 0; j < BLUE_END; j++) {
+        aries[i].linksO[j] = 0;
+      }
+    }
+
+    //add bandwidth incrementally
+    if(iter < NUM_ITERS) {
+      for(int i = 0; i < numAries; i++) {
+        for(int j = 0; j < BLUE_END; j++) {
+          if(j < GREEN_END) aries[i].linksB[j] += GREEN_BW/(float)NUM_ITERS;
+          else if(j < BLACK_END) aries[i].linksB[j] += BLACK_BW/(float)NUM_ITERS;
+          else aries[i].linksB[j] += BLUE_BW/(float)NUM_ITERS;
+        }
+        for(int j = 0; j < 4; j++) {
+          aries[i].pciSB[j] += PCI_BW/(float)NUM_ITERS;
+          aries[i].pciRB[j] += PCI_BW/(float)NUM_ITERS;
+        }
+      }
+    }
+    selectExpansionRequests(expand);
+    markExpansionRequests();
+    updateMessageAndLinks();
+  }
+
+  printf("Number of iterations executed: %d\n", iter);
+  computeSummary();
+  printStats();
+}
+
+inline void markExpansionRequests() {
+  //mark all links
+  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
+    Msg &currmsg = *msgit;
+    for(int i = 0; i < currmsg.paths.size(); i++) {
+      if(currmsg.expand[i]) {
+        aries[currmsg.src].pciSO[currmsg.srcPCI] += currmsg.loads[i];
+        aries[currmsg.dst].pciRO[currmsg.dstPCI] += currmsg.loads[i];
+        for(int j = 0; j < currmsg.paths[i].size(); j++) {
+          aries[currmsg.paths[i][j].aries].linksO[currmsg.paths[i][j].link] += currmsg.loads[i];
+        }
+      }
+    }
+  }
+  //effective bandwidth
+  /*for(int i = 0; i < numAries; i++) {
+    for(int j = 0; j < 4; j++) {
+      if(aries[i].pciSO[j]) {
+        aries[i].pciSO[j] = aries[i].pciSB[j]/aries[i].pciSO[j];
+      }
+      if(aries[i].pciRO[j]) {
+        aries[i].pciRO[j] = aries[i].pciRB[j]/aries[i].pciRO[j];
+      }
+    }
+    for(int j = 0; j < BLUE_END; j++) {
+      if(aries[i].linksO[j]) {
+        aries[i].linksO[j] = aries[i].linksB[j]/aries[i].linksO[j];
+      }
+    }*/
+}
+
+inline void updateMessageAndLinks() {
+  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
+    Msg &currmsg = *msgit;
+    for(int i = 0; i < currmsg.paths.size(); i++) {
+      if(currmsg.expand[i]) {
+        float min = FLT_MAX;
+        for(int j = 0; j < currmsg.paths[i].size(); j++) {
+          min = MIN(min, (currmsg.loads[i]/aries[currmsg.paths[i][j].aries].linksO[currmsg.paths[i][j].link])*aries[currmsg.paths[i][j].aries].linksB[currmsg.paths[i][j].link]);
+        }
+        min = MIN(min, (currmsg.loads[i]/aries[currmsg.src].pciSO[currmsg.srcPCI])*aries[currmsg.src].pciSB[currmsg.srcPCI]);
+        min = MIN(min, (currmsg.loads[i]/aries[currmsg.dst].pciRO[currmsg.dstPCI])*aries[currmsg.dst].pciRB[currmsg.dstPCI]);
+
+        for(int j = 0; j < currmsg.paths[i].size(); j++) {
+          aries[currmsg.paths[i][j].aries].linksB[currmsg.paths[i][j].link] -= min;
+        }
+        aries[currmsg.src].pciSB[currmsg.srcPCI] -= min;
+        aries[currmsg.dst].pciRB[currmsg.dstPCI] -= min;
+        currmsg.bw +=  min;
+        currmsg.allocated[i] += min;
+      }
+    }
+  }
+}
+
+void selectExpansionRequests(bool & expand) {
+  static bool isFirst = true;
+  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
+    Msg &currmsg = *msgit;
+
+    if(aries[currmsg.src].pciSB[currmsg.srcPCI] < CUTOFF_BW || aries[currmsg.dst].pciRB[currmsg.dstPCI] < CUTOFF_BW) {
+      for(int i = 0; i < currmsg.paths.size(); i++) {
+        currmsg.expand[i] = false;
+      }
+      continue;
+    }
+
+    float sum = 0;
+
+    if(!isFirst) {
+      for(int i = 0; i < currmsg.paths.size(); i++) {
+        currmsg.loads[i] = FLT_MAX;
+        for(int j = 0; j < currmsg.paths[i].size(); j++) {
+          currmsg.loads[i] = MIN(currmsg.loads[i], aries[currmsg.paths[i][j].aries].linksB[currmsg.paths[i][j].link]);
+        }
+        sum += currmsg.loads[i];
+      }
+
+      sum /= currmsg.paths.size();
+      sum -= CUTOFF_BW;
+    }
+
+    int count = 0;
+    for(int i = 0; i < currmsg.paths.size(); i++) {
+      if(currmsg.loads[i] < CUTOFF_BW) {
+        currmsg.expand[i] = false;
+      } else {
+        if(currmsg.loads[i] > sum) {
+          currmsg.expand[i] = true;
+          currmsg.loads[i] = 1.0;
+          count++;
+          expand = true;
+        } else {
+          currmsg.expand[i] = false;
+        }
+      }
+      if(count > 1) {
+        if(currmsg.loads.size() == 2) {
+          currmsg.loads[0] = currmsg.loads[1] = 0.5;
+        } else {
+          if(currmsg.expand[0] && currmsg.expand[1] )
+            currmsg.loads[0] = currmsg.loads[1] = 0.5;
+          if(currmsg.expand[2] && currmsg.expand[3] )
+            currmsg.loads[2] = currmsg.loads[3] = 0.5;
+          if(currmsg.expand[0] && currmsg.expand[2] )
+            currmsg.loads[0] = currmsg.loads[2] = 0.5;
+          if(currmsg.expand[1] && currmsg.expand[3] )
+            currmsg.loads[1] = currmsg.loads[3] = 0.5;
+        }
+      }
+    }
+  }
+  isFirst = false;
+}
+
+inline void computeSummary() {
+  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
+    Msg &currmsg = *msgit;
+    aries[currmsg.src].pciSO[currmsg.srcPCI] += currmsg.bytes;
+    aries[currmsg.dst].pciRO[currmsg.dstPCI] += currmsg.bytes;
+    for(int i = 0; i < currmsg.paths.size(); i++) {
+      float pathLoad = currmsg.bytes*(currmsg.allocated[i]/currmsg.bw);
+      for(int j = 0; j < currmsg.paths[i].size(); j++) {
+        aries[currmsg.paths[i][j].aries].linksO[currmsg.paths[i][j].link] += pathLoad;
+      }
+    }
+  }
 }
 
 #if DIRECT_ROUTING
-inline int addPathsToMsgs() {
-  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
+inline void addPathsToMsgs() {
+  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end();) {
     Msg &currmsg = *msgit;
     Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
-    //if same aries, return 0
+    //if same aries, remove message from list
     if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]
-      && src.coords[TIER3] == dst.coords[TIER3]) return 0;
+      && src.coords[TIER3] == dst.coords[TIER3]) {
+       msgit = msgs.erase(msgit);
+       continue;
+    }
 
     //in the same lowest tier - direct connection
     if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]) {
@@ -623,24 +817,36 @@ inline int addPathsToMsgs() {
       currmsg.paths[0].resize(1);
       currmsg.paths[0][0].aries = currmsg.src;
       currmsg.paths[0][0].link = dst.coords[TIER3]; //GREEN
-      return 1;
-    } else if(src.coords[TIER1] == dst.coords[TIER1]) {
-      //in the same second tier
-      if(src.coords[TIER3] == dst.coords[TIER3]) {
-        //aligned on tier3 - direct connection
+      currmsg.expand.push_back(true);
+      currmsg.loads.push_back(1.0);
+      currmsg.allocated.push_back(0.0);
+    } else if(src.coords[TIER1] == dst.coords[TIER1]) { //in the same second tier
+      if(src.coords[TIER3] == dst.coords[TIER3]) { //aligned on tier3 - direct connection
         currmsg.paths.resize(1);
         currmsg.paths[0].resize(1);
         currmsg.paths[0][0].aries = currmsg.src;
         currmsg.paths[0][0].link = BLACK_START + dst.coords[TIER2];
-        return 1;
-      } // else two paths of length 2
-      currmsg.paths.resize(2);
-      addToPath(currmsg.paths, src, currmsg.src, dst, 0, 1);
-      return 1;
+        currmsg.expand.push_back(true);
+        currmsg.loads.push_back(1.0);
+        currmsg.allocated.push_back(0.0);
+      } else {  // else two paths of length 2
+        currmsg.paths.resize(2);
+        addToPath(currmsg.paths, src, currmsg.src, dst, 0, 1);
+        currmsg.expand.resize(2, true);
+        currmsg.loads.resize(2, 1.0);
+        currmsg.allocated.resize(2, 0.0);
+      }
     } else {
       addFullPaths(currmsg.paths, src, currmsg.src, dst, currmsg.dst);
-      return 1;
+      currmsg.expand.resize(currmsg.paths.size(), true);
+      if(currmsg.paths.size() == 1) {
+        currmsg.loads.resize(currmsg.paths.size(), 1.0);
+      } else {
+        currmsg.loads.resize(currmsg.paths.size(), 0.5);
+      }
+      currmsg.allocated.resize(currmsg.paths.size(), 0.0);
     }
+    msgit++;
   }
 }
 
@@ -697,8 +903,7 @@ void addFullPaths(vector< Path > & paths, Coords src, int srcNum, Coords &dst, i
     interNode.coords[TIER2] = localConnection/maxCoords.coords[TIER3];
     interNode.coords[TIER3] = localConnection % maxCoords.coords[TIER3];
     coordstoAriesRank(interNum, interNode);
-    //if use only 1 GREEN LINK
-    if(interNode.coords[TIER2] == src.coords[TIER2]) {
+    if(interNode.coords[TIER2] == src.coords[TIER2]) { //if use only 1 GREEN LINK
       Hop h;
       h.aries = srcNum;
       h.link = interNode.coords[TIER3];
@@ -733,8 +938,7 @@ void addFullPaths(vector< Path > & paths, Coords src, int srcNum, Coords &dst, i
     interNode.coords[TIER2] = remoteConnection/maxCoords.coords[TIER3];
     interNode.coords[TIER3] = remoteConnection % maxCoords.coords[TIER3];
     coordstoAriesRank(interNum, interNode);
-    //if use only 1 GREEN LINK
-    if(interNode.coords[TIER2] == dst.coords[TIER2]) {
+    if(interNode.coords[TIER2] == dst.coords[TIER2]) { //if use only 1 GREEN LINK
       Hop h;
       h.aries = interNum;
       h.link = dst.coords[TIER3]; //GREEN
@@ -755,5 +959,5 @@ void addFullPaths(vector< Path > & paths, Coords src, int srcNum, Coords &dst, i
     }
   }
 }
-#endif // DYNAMIC ROUTING
+#endif // DIRECT_ROUTING
 #endif // !STATIC ROUTING
