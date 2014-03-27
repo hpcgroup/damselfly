@@ -7,9 +7,10 @@
 #include <vector>
 #include <sys/time.h>
 #include <cfloat>
+#include <omp.h>
 
 #ifndef STATIC_ROUTING
-#define STATIC_ROUTING 0
+#define STATIC_ROUTING 1
 #endif
 
 #ifndef DIRECT_ROUTING
@@ -17,6 +18,8 @@
 #endif
 
 using namespace std;
+
+#define USE_THREADS 1
 
 #define TIER1 0
 #define TIER2 1
@@ -473,29 +476,79 @@ inline void addLoads() {
   float perPacket = PACKET_SIZE/MB;
   int count = 0;
   int printFreq = MAX(10, numMsgs/10);
-  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
-    count++;
-    if(count % printFreq == 0) {
-      printf("Modeling at msg num %d\n", count);
+#if USE_THREADS
+#pragma omp parallel
+{
+  float **tempAries = new float*[numAries];
+  for(int i = 0; i < numAries; i++) {
+    tempAries[i] = new float[BLUE_END];
+    for(int j = 0; j < BLUE_END; j++) {
+      tempAries[i][j] = 0;
     }
+
+    #pragma omp master
+    {
+      printf("Number of threads %d\n",omp_get_num_threads());
+    }
+  }
+#endif
+  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
+#if USE_THREADS
+    #pragma omp master
+    {
+#endif
+      count++;
+      if(count % printFreq == 0) {
+        printf("Modeling at msg num %d\n", count);
+      }
+#if USE_THREADS
+    }
+#endif
     Msg &currmsg = *msgit;
     Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
     if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]
       && src.coords[TIER3] == dst.coords[TIER3]) continue;
 
-    aries[currmsg.src].pciSO[currmsg.srcPCI] += currmsg.bytes;
-    aries[currmsg.dst].pciRO[currmsg.dstPCI] += currmsg.bytes;
+#if USE_THREADS
+    #pragma omp master
+    {
+#endif
+      aries[currmsg.src].pciSO[currmsg.srcPCI] += currmsg.bytes;
+      aries[currmsg.dst].pciRO[currmsg.dstPCI] += currmsg.bytes;
+#if USE_THREADS
+    }
+#endif
     int numPackets = currmsg.bytes/perPacket;
     numPackets = MAX(1, numPackets);
 
+#if USE_THREADS
+#pragma omp for
+#endif
     for(int i = 0; i < numPackets; i++) {
       Path p;
       getRandomPath(src, currmsg.src, dst, currmsg.dst, p);
       for(int j = 0; j < p.size(); j++) {
+#if USE_THREADS
+        tempAries[p[j].aries].linksO[p[j].link] += perPacket;
+#else
         aries[p[j].aries].linksO[p[j].link] += perPacket;
+#endif
       }
     }
   }
+#if USE_THREADS
+  #pragma omp critical
+  {
+    for(int i = 0; i < numAries; i++) {
+      for(int j = 0; j < BLUE_END; j++) {
+        aries[i].linksO[j] +=  tempAries[i][j];
+      }
+      delete [] tempAries[i];
+    }
+    delete [] tempAries;
+  }
+}
+#endif
 }
 #endif // not using DIRECT_ROUTING
 #endif // STATIC_ROUTING
