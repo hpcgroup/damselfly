@@ -19,7 +19,7 @@
 
 using namespace std;
 
-#define USE_THREADS 1
+#define USE_THREADS 0
 
 #define TIER1 0
 #define TIER2 1
@@ -485,11 +485,10 @@ inline void addLoads() {
     for(int j = 0; j < BLUE_END; j++) {
       tempAries[i][j] = 0;
     }
-
-    #pragma omp master
-    {
-      printf("Number of threads %d\n",omp_get_num_threads());
-    }
+  }
+  #pragma omp master
+  {
+    printf("Number of threads %d\n",omp_get_num_threads());
   }
 #endif
   for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
@@ -529,7 +528,7 @@ inline void addLoads() {
       getRandomPath(src, currmsg.src, dst, currmsg.dst, p);
       for(int j = 0; j < p.size(); j++) {
 #if USE_THREADS
-        tempAries[p[j].aries].linksO[p[j].link] += perPacket;
+        tempAries[p[j].aries][p[j].link] += perPacket;
 #else
         aries[p[j].aries].linksO[p[j].link] += perPacket;
 #endif
