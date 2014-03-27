@@ -7,7 +7,6 @@
 #include <vector>
 #include <sys/time.h>
 #include <cfloat>
-#include <omp.h>
 
 #ifndef STATIC_ROUTING
 #define STATIC_ROUTING 1
@@ -20,6 +19,10 @@
 using namespace std;
 
 #define USE_THREADS 0
+
+#if USE_THREADS
+#include <omp.h>
+#endif
 
 #define TIER1 0
 #define TIER2 1
@@ -49,6 +52,20 @@ using namespace std;
 
 #define MAX(a,b) (((a)>(b))?(a):(b))
 #define MIN(a,b) (((a)<(b))?(a):(b))
+
+ #define A_PRIME 13
+ #define B_PRIME 19
+
+unsigned rand_seed;
+
+inline void mysrand(unsigned seed) {
+  rand_seed = seed;
+}
+
+inline unsigned myrand () {
+   rand_seed = A_PRIME * (rand_seed) + B_PRIME;
+   return rand_seed;
+ }
 
 // coordinates
 typedef struct Coords {
@@ -471,7 +488,7 @@ void addFullPaths(vector< Path > & paths, Coords src, int srcNum, Coords &dst, i
 #else // not using DIRECT_ROUTING
 
 inline void addLoads() {
-  srand(time(NULL));
+  mysrand(time(NULL));
   float MB = 1024*1024;
   float perPacket = PACKET_SIZE/MB;
   int count = 0;
@@ -490,7 +507,8 @@ inline void addLoads() {
   {
     printf("Number of threads %d\n",omp_get_num_threads());
   }
-#endif
+  #endif
+
   for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
 #if USE_THREADS
     #pragma omp master
@@ -503,6 +521,7 @@ inline void addLoads() {
 #if USE_THREADS
     }
 #endif
+    //if(count < printFreq) continue;
     Msg &currmsg = *msgit;
     Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
     if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]
@@ -520,11 +539,12 @@ inline void addLoads() {
     int numPackets = currmsg.bytes/perPacket;
     numPackets = MAX(1, numPackets);
 
+    Path p;
 #if USE_THREADS
 #pragma omp for
 #endif
     for(int i = 0; i < numPackets; i++) {
-      Path p;
+      p.clear();
       getRandomPath(src, currmsg.src, dst, currmsg.dst, p);
       for(int j = 0; j < p.size(); j++) {
 #if USE_THREADS
@@ -555,41 +575,45 @@ inline void addLoads() {
 inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum, Path & p) {
   //same group
   if(src.coords[TIER1] == dst.coords[TIER1]) {
-    int valiantNum = rand() % ariesPerGroup;
+    int valiantNum = myrand() % ariesPerGroup;
     Coords valiantNode;
-    while(valiantNum == aries[srcNum].localRank) {
-      valiantNum = rand() % ariesPerGroup;
-    }
     valiantNode.coords[TIER1] = src.coords[TIER1];
     valiantNode.coords[TIER2] = valiantNum / maxCoords.coords[TIER3];
     valiantNode.coords[TIER3] = valiantNum % maxCoords.coords[TIER3];
     coordstoAriesRank(valiantNum, valiantNode);
-    addIntraPath(src, srcNum, valiantNode, valiantNum, p);
+    if(valiantNum != srcNum) {
+      addIntraPath(src, srcNum, valiantNode, valiantNum, p);
+    }
     if(valiantNum != dstNum) {
       addIntraPath(valiantNode, valiantNum, dst, dstNum, p);
     }
   } else { //different groups
-    int valiantNum = rand() % maxCoords.coords[TIER1];
+    int valiantNum = myrand() % maxCoords.coords[TIER1];
     Coords valiantNode;
-    bool noValiant = false;
-    while(valiantNum == src.coords[TIER1]) {
-      valiantNum = rand() % ariesPerGroup;
-    }
-    if(valiantNum == dst.coords[TIER1]) {
-      noValiant = true;
+    bool noValiantS = false;
+    bool noValiantD = false;
+
+    if(valiantNum == src.coords[TIER1]) {
+      noValiantS = true;
+      valiantNode = src;
+      valiantNum = srcNum;
+    } else if(valiantNum == dst.coords[TIER1]) {
+      noValiantD = true;
       valiantNode = dst;
       valiantNum = dstNum;
     } else {
       valiantNode.coords[TIER1] = valiantNum;
-      valiantNum = rand() % ariesPerGroup;
+      valiantNum = myrand() % ariesPerGroup;
       valiantNode.coords[TIER2] = valiantNum / maxCoords.coords[TIER3];
       valiantNode.coords[TIER3] = valiantNum % maxCoords.coords[TIER3];
       coordstoAriesRank(valiantNum, valiantNode);
     }
 
-    addInterPath(src, srcNum, valiantNode, valiantNum, p);
+    if(!noValiantS) {
+     addInterPath(src, srcNum, valiantNode, valiantNum, p);
+    }
 
-    if(!noValiant) {
+    if(!noValiantD) {
       addInterPath(valiantNode, valiantNum, dst, dstNum, p);
     }
   }
@@ -606,7 +630,7 @@ inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum, Path
     h.link = BLACK_START + dst.coords[TIER2];
     p.push_back(h);
   } else { //two paths, choose 1
-    if(rand() % 2) { //first GREEN, then BLACK
+    if(myrand() % 2) { //first GREEN, then BLACK
       h.aries = srcNum;
       h.link = dst.coords[TIER3];
       p.push_back(h);
@@ -653,7 +677,7 @@ inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum, Path
     localConnection = src.coords[TIER1] % ariesPerGroup;
     if(localConnection != aries[dstNum].localRank) {
       interNode.coords[TIER1] = dst.coords[TIER1];
-      interNode.coords[TIER2] = localConnection % maxCoords.coords[TIER3];
+      interNode.coords[TIER2] = localConnection / maxCoords.coords[TIER3];
       interNode.coords[TIER3] = localConnection % maxCoords.coords[TIER3];
       coordstoAriesRank(interNum, interNode);
       addIntraPath(interNode, interNum, dst, dstNum, p);
@@ -952,7 +976,7 @@ void model() {
       }
     }
 
-    srand(seed);
+    mysrand(seed);
     // intial set up
     addPathsToMsgs();
     //set load, expansion
