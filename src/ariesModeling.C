@@ -49,13 +49,12 @@ using namespace std;
 
 #define PCI_BW 16384
 
-#define CUTOFF_BW 1
-
 #define PACKET_SIZE 64
 
-#define NUM_ITERS 30
-#define PATHS_PER_ITER 10
-#define MAX_ITERS 100
+#define CUTOFF_BW .01
+#define NUM_ITERS 100
+#define PATHS_PER_ITER 4
+#define MAX_ITERS 150
 
 #define MAX(a,b) (((a)>(b))?(a):(b))
 #define MIN(a,b) (((a)<(b))?(a):(b))
@@ -63,6 +62,7 @@ using namespace std;
  #define A_PRIME 13
  #define B_PRIME 19
 
+typedef double myreal;
 unsigned rand_seed;
 
 inline void mysrand(unsigned seed) {
@@ -79,7 +79,7 @@ inline unsigned myrand () {
 inline unsigned myrand_r (unsigned *seed) {
    //*seed = A_PRIME * (*seed) + B_PRIME;
    //return *seed;
-#if USE_THREADS
+#if 0 && USE_THREADS
    for(int i = 0; i < omp_get_num_threads() - 1; i++) {
      rand_r(seed);
    }
@@ -93,13 +93,13 @@ typedef struct Coords {
 } Coords;
 
 typedef struct Aries {
-  float linksO[32]; // 0-15 Green, 16-21 Black
-  float linksB[32]; //remaining link bandwidth
-  float pciSO[4], pciRO[4]; //send and recv PCI
-  float pciSB[4], pciRB[4]; //remaining PCI bandwidth
+  myreal linksO[32]; // 0-15 Green, 16-21 Black
+  myreal linksB[32]; //remaining link bandwidth
+  myreal pciSO[4], pciRO[4]; //send and recv PCI
+  myreal pciSB[4], pciRB[4]; //remaining PCI bandwidth
   int localRank; //rank within the group
 #if !STATIC_ROUTING && !DIRECT_ROUTING
-  float linksSum[32]; //needed to continously get traffic
+  myreal linksSum[32]; //needed to continously get traffic
 #endif
 } Aries;
 
@@ -113,12 +113,12 @@ typedef vector<Hop> Path;
 typedef struct Msg {
   int src, dst;
   int srcPCI, dstPCI;
-  float bytes; //in MB
-  float bw; //allocated
+  myreal bytes; //in MB
+  myreal bw; //allocated
   vector< Path > paths;
   vector< bool > expand;
-  vector< float > loads;
-  vector< float > allocated;
+  vector< myreal > loads;
+  vector< myreal > allocated;
 } Msg;
 
 int numMsgs; // number of messages to be sent
@@ -246,12 +246,12 @@ int main(int argc, char**argv) {
 
   /* Read the communication graph which is in edge-list format */
   printf("Reading messages\n");
-  float MB = 1024 * 1024;
+  myreal MB = 1024 * 1024;
   struct timeval startRead, endRead;
   gettimeofday(&startRead, NULL);
   while(!feof(commfile)) {
     Msg newmsg;
-    fscanf(commfile, "%d %d %f\n", &newmsg.src, &newmsg.dst, &newmsg.bytes);
+    fscanf(commfile, "%d %d %lf\n", &newmsg.src, &newmsg.dst, &newmsg.bytes);
     newmsg.bytes /= MB;
     newmsg.srcPCI = coords[newmsg.src].coords[NUM_LEVELS];
     newmsg.dstPCI = coords[newmsg.dst].coords[NUM_LEVELS];
@@ -297,7 +297,7 @@ int main(int argc, char**argv) {
 }
 
 inline void printStats() {
-  float maxLoad = 0, minLoad = FLT_MAX, maxPCI = 0, minPCI = FLT_MAX;
+  myreal maxLoad = 0, minLoad = FLT_MAX, maxPCI = 0, minPCI = FLT_MAX;
   double totalLinkLoad = 0, totalPCILoad = 0;
   for(int i = 0; i < numAries; i++) {
     for(int j = 0; j < 4; j++) {
@@ -358,7 +358,7 @@ inline void addLoads() {
     Msg &currmsg = *msgit;
     aries[currmsg.src].pciSO[currmsg.srcPCI] += currmsg.bytes;
     aries[currmsg.dst].pciRO[currmsg.dstPCI] += currmsg.bytes;
-    float perPath = currmsg.bytes/currmsg.paths.size();
+    myreal perPath = currmsg.bytes/currmsg.paths.size();
     for(int i = 0; i < currmsg.paths.size(); i++) {
       for(int j = 0; j < currmsg.paths[i].size(); j++) {
         aries[currmsg.paths[i][j].aries].linksO[currmsg.paths[i][j].link] += perPath;
@@ -511,16 +511,16 @@ int primes[] = {2, 1399, 2161, 4051, 5779, 6911, 7883, 10141, 12163, 13309, 1512
 inline void addLoads() {
   unsigned seed = time(NULL);
   mysrand(seed);
-  float MB = 1024*1024;
-  float perPacket = PACKET_SIZE/MB;
+  myreal MB = 1024*1024;
+  myreal perPacket = PACKET_SIZE/MB;
   int count = 0;
   int printFreq = MAX(10, numMsgs/10);
 #if USE_THREADS
 #pragma omp parallel
 {
-  float **tempAries = new float*[numAries];
+  myreal **tempAries = new myreal*[numAries];
   for(int i = 0; i < numAries; i++) {
-    tempAries[i] = new float[BLUE_END];
+    tempAries[i] = new myreal[BLUE_END];
     for(int j = 0; j < BLUE_END; j++) {
       tempAries[i][j] = 0;
     }
@@ -530,10 +530,11 @@ inline void addLoads() {
     printf("Number of threads %d\n",omp_get_num_threads());
   }
 
-  unsigned lseed = primes[0];
+  unsigned lseed = primes[omp_get_thread_num()];
+  /*unsigned lseed = primes[0];
   for(int i = 0; i < omp_get_thread_num(); i++) {
     rand_r(&lseed);
-  }
+  }*/
   #endif
 
   for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
@@ -738,13 +739,13 @@ void model() {
   for(int i = 0; i < numAries; i++) {
     aries[i].localRank = coords[i].coords[TIER2] * maxCoords.coords[TIER3] + coords[i].coords[TIER3];
     for(int j = 0; j < BLUE_END; j++) {
-      if(j < GREEN_END) aries[i].linksB[j] = GREEN_BW/(float)NUM_ITERS;
-      else if(j < BLACK_END) aries[i].linksB[j] = BLACK_BW/(float)NUM_ITERS;
-      else aries[i].linksB[j] = BLUE_BW/(float)NUM_ITERS;
+      if(j < GREEN_END) aries[i].linksB[j] = GREEN_BW/(myreal)NUM_ITERS;
+      else if(j < BLACK_END) aries[i].linksB[j] = BLACK_BW/(myreal)NUM_ITERS;
+      else aries[i].linksB[j] = BLUE_BW/(myreal)NUM_ITERS;
     }
     for(int j = 0; j < 4; j++) {
-      aries[i].pciSB[j] = PCI_BW/(float)NUM_ITERS;
-      aries[i].pciRB[j] = PCI_BW/(float)NUM_ITERS;
+      aries[i].pciSB[j] = PCI_BW/(myreal)NUM_ITERS;
+      aries[i].pciRB[j] = PCI_BW/(myreal)NUM_ITERS;
     }
   }
 
@@ -774,13 +775,13 @@ void model() {
     if(iter < NUM_ITERS) {
       for(int i = 0; i < numAries; i++) {
         for(int j = 0; j < BLUE_END; j++) {
-          if(j < GREEN_END) aries[i].linksB[j] += GREEN_BW/(float)NUM_ITERS;
-          else if(j < BLACK_END) aries[i].linksB[j] += BLACK_BW/(float)NUM_ITERS;
-          else aries[i].linksB[j] += BLUE_BW/(float)NUM_ITERS;
+          if(j < GREEN_END) aries[i].linksB[j] += GREEN_BW/(myreal)NUM_ITERS;
+          else if(j < BLACK_END) aries[i].linksB[j] += BLACK_BW/(myreal)NUM_ITERS;
+          else aries[i].linksB[j] += BLUE_BW/(myreal)NUM_ITERS;
         }
         for(int j = 0; j < 4; j++) {
-          aries[i].pciSB[j] += PCI_BW/(float)NUM_ITERS;
-          aries[i].pciRB[j] += PCI_BW/(float)NUM_ITERS;
+          aries[i].pciSB[j] += PCI_BW/(myreal)NUM_ITERS;
+          aries[i].pciRB[j] += PCI_BW/(myreal)NUM_ITERS;
         }
       }
     }
@@ -809,7 +810,7 @@ inline void updateMessageAndLinks() {
     Msg &currmsg = *msgit;
     for(int i = 0; i < currmsg.paths.size(); i++) {
       if(currmsg.expand[i]) {
-        float min = FLT_MAX;
+        myreal min = FLT_MAX;
         for(int j = 0; j < currmsg.paths[i].size(); j++) {
           min = MIN(min, (currmsg.loads[i]/aries[currmsg.paths[i][j].aries].linksO[currmsg.paths[i][j].link])*aries[currmsg.paths[i][j].aries].linksB[currmsg.paths[i][j].link]);
         }
@@ -834,7 +835,7 @@ inline void computeSummary() {
     aries[currmsg.src].pciSO[currmsg.srcPCI] += currmsg.bytes;
     aries[currmsg.dst].pciRO[currmsg.dstPCI] += currmsg.bytes;
     for(int i = 0; i < currmsg.paths.size(); i++) {
-      float pathLoad = currmsg.bytes*(currmsg.allocated[i]/currmsg.bw);
+      myreal pathLoad = currmsg.bytes*(currmsg.allocated[i]/currmsg.bw);
       for(int j = 0; j < currmsg.paths[i].size(); j++) {
         aries[currmsg.paths[i][j].aries].linksO[currmsg.paths[i][j].link] += pathLoad;
       }
@@ -1023,13 +1024,13 @@ void model() {
     for(int i = 0; i < numAries; i++) {
       aries[i].localRank = coords[i].coords[TIER2] * maxCoords.coords[TIER3] + coords[i].coords[TIER3];
       for(int j = 0; j < BLUE_END; j++) {
-        if(j < GREEN_END) aries[i].linksB[j] = GREEN_BW/(float)NUM_ITERS;
-        else if(j < BLACK_END) aries[i].linksB[j] = BLACK_BW/(float)NUM_ITERS;
-        else aries[i].linksB[j] = BLUE_BW/(float)NUM_ITERS;
+        if(j < GREEN_END) aries[i].linksB[j] = GREEN_BW/(myreal)NUM_ITERS;
+        else if(j < BLACK_END) aries[i].linksB[j] = BLACK_BW/(myreal)NUM_ITERS;
+        else aries[i].linksB[j] = BLUE_BW/(myreal)NUM_ITERS;
       }
       for(int j = 0; j < 4; j++) {
-        aries[i].pciSB[j] = PCI_BW/(float)NUM_ITERS;
-        aries[i].pciRB[j] = PCI_BW/(float)NUM_ITERS;
+        aries[i].pciSB[j] = PCI_BW/(myreal)NUM_ITERS;
+        aries[i].pciRB[j] = PCI_BW/(myreal)NUM_ITERS;
       }
     }
 
@@ -1051,7 +1052,8 @@ void model() {
     int iter;
     for(iter = 0; iter < MAX_ITERS && expand; iter++) {
       expand = false;
-
+      if(iter % 50 == 0)
+      printf("Iter %d\n",iter);
       //reset needed to zero
       for(int i = 0; i < numAries; i++) {
         for(int j = 0; j < 4; j++) {
@@ -1067,13 +1069,13 @@ void model() {
       if(iter < NUM_ITERS) {
         for(int i = 0; i < numAries; i++) {
           for(int j = 0; j < BLUE_END; j++) {
-            if(j < GREEN_END) aries[i].linksB[j] += GREEN_BW/(float)NUM_ITERS;
-            else if(j < BLACK_END) aries[i].linksB[j] += BLACK_BW/(float)NUM_ITERS;
-            else aries[i].linksB[j] += BLUE_BW/(float)NUM_ITERS;
+            if(j < GREEN_END) aries[i].linksB[j] += GREEN_BW/(myreal)NUM_ITERS;
+            else if(j < BLACK_END) aries[i].linksB[j] += BLACK_BW/(myreal)NUM_ITERS;
+            else aries[i].linksB[j] += BLUE_BW/(myreal)NUM_ITERS;
           }
           for(int j = 0; j < 4; j++) {
-            aries[i].pciSB[j] += PCI_BW/(float)NUM_ITERS;
-            aries[i].pciRB[j] += PCI_BW/(float)NUM_ITERS;
+            aries[i].pciSB[j] += PCI_BW/(myreal)NUM_ITERS;
+            aries[i].pciRB[j] += PCI_BW/(myreal)NUM_ITERS;
           }
         }
       }
@@ -1110,7 +1112,7 @@ inline void updateMessageAndLinks() {
     Msg &currmsg = *msgit;
     for(int i = 0; i < currmsg.paths.size(); i++) {
       if(currmsg.expand[i]) {
-        float min = FLT_MAX;
+        myreal min = FLT_MAX;
         for(int j = 0; j < currmsg.paths[i].size(); j++) {
           min = MIN(min, (currmsg.loads[i]/aries[currmsg.paths[i][j].aries].linksO[currmsg.paths[i][j].link])*aries[currmsg.paths[i][j].aries].linksB[currmsg.paths[i][j].link]);
         }
@@ -1126,7 +1128,7 @@ inline void updateMessageAndLinks() {
         if(round == 0) {
           currmsg.bw +=  min;
         } else {
-          float pathLoad = currmsg.bytes*(min/currmsg.bw);
+          myreal pathLoad = currmsg.bytes*(min/currmsg.bw);
           for(int j = 0; j < currmsg.paths[i].size(); j++) {
             aries[currmsg.paths[i][j].aries].linksSum[currmsg.paths[i][j].link] += pathLoad;
           }
@@ -1165,7 +1167,7 @@ void selectExpansionRequests(bool & expand) {
       continue;
     }
 
-    float sum = 0;
+    myreal sum = 0;
 
     for(int i = 0; i < currmsg.paths.size(); i++) {
       currmsg.loads[i] = FLT_MAX;
