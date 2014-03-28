@@ -16,9 +16,15 @@
 #define DIRECT_ROUTING 0
 #endif
 
-using namespace std;
-
 #define USE_THREADS 0
+
+#if !STATIC_ROUTING || DIRECT_ROUTING
+#if USE_THREADS
+#error Can not compile threaded version without static and indirect routing
+#endif
+#endif
+
+using namespace std;
 
 #if USE_THREADS
 #include <omp.h>
@@ -509,7 +515,7 @@ inline void addLoads() {
   int count = 0;
   int printFreq = MAX(10, numMsgs/10);
 #if USE_THREADS
-#pragma omp parallel 
+#pragma omp parallel
 {
   float **tempAries = new float*[numAries];
   for(int i = 0; i < numAries; i++) {
@@ -541,7 +547,6 @@ inline void addLoads() {
 #if USE_THREADS
     }
 #endif
-    //if(count < printFreq) continue;
     Msg &currmsg = *msgit;
     Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
     if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]
@@ -609,10 +614,10 @@ inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum, Path 
     valiantNode.coords[TIER2] = valiantNum / maxCoords.coords[TIER3];
     valiantNode.coords[TIER3] = valiantNum % maxCoords.coords[TIER3];
     coordstoAriesRank(valiantNum, valiantNode);
-    if(valiantNum != aries[srcNum].localRank) {
+    if(valiantNum != srcNum) {
       addIntraPath(src, srcNum, valiantNode, valiantNum, p, seed);
     }
-    if(valiantNum != aries[dstNum].localRank) {
+    if(valiantNum != dstNum) {
       addIntraPath(valiantNode, valiantNum, dst, dstNum, p, seed);
     }
   } else { //different groups
