@@ -65,11 +65,12 @@ inline void mysrand(unsigned seed) {
 inline unsigned myrand () {
    rand_seed = A_PRIME * (rand_seed) + B_PRIME;
    return rand_seed;
- }
+}
 
 inline unsigned myrand_r (unsigned *seed) {
    *seed = A_PRIME * (*seed) + B_PRIME;
    return *seed;
+}
 
 // coordinates
 typedef struct Coords {
@@ -491,6 +492,7 @@ void addFullPaths(vector< Path > & paths, Coords src, int srcNum, Coords &dst, i
 }
 #else // not using DIRECT_ROUTING
 
+int primes[] = {2, 1399, 2161, 4051, 5779, 6911, 7883, 10141, 12163, 13309, 15121, 16889, 18311, 20443, 21169, 23029};
 inline void addLoads() {
   unsigned seed = time(NULL);
   mysrand(seed);
@@ -499,7 +501,7 @@ inline void addLoads() {
   int count = 0;
   int printFreq = MAX(10, numMsgs/10);
 #if USE_THREADS
-#pragma omp parallel private(seed)
+#pragma omp parallel 
 {
   float **tempAries = new float*[numAries];
   for(int i = 0; i < numAries; i++) {
@@ -513,7 +515,7 @@ inline void addLoads() {
     printf("Number of threads %d\n",omp_get_num_threads());
   }
 
-  unsigned lseed = seed * omp_get_thread_num();
+  unsigned lseed = primes[omp_get_thread_num()];
   #endif
 
   for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
