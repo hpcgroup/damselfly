@@ -53,8 +53,9 @@ using namespace std;
 
 #define PACKET_SIZE 64
 
-#define NUM_ITERS 10
+#define NUM_ITERS 30
 #define PATHS_PER_ITER 10
+#define MAX_ITERS 100
 
 #define MAX(a,b) (((a)>(b))?(a):(b))
 #define MIN(a,b) (((a)<(b))?(a):(b))
@@ -755,7 +756,7 @@ void model() {
   bool expand = true;
 
   int iter;
-  for(iter = 0; iter < 50 && expand; iter++) {
+  for(iter = 0; iter < MAX_ITERS && expand; iter++) {
     expand = false;
 
     //reset needed to zero
@@ -1003,6 +1004,17 @@ int round;
 void model() {
   long long seed = time(NULL);
 
+  //delete self messages
+  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); ) {
+    Msg &currmsg = *msgit;
+    Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
+     if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]
+      && src.coords[TIER3] == dst.coords[TIER3]) {
+      msgit = msgs.erase(msgit );
+      continue;
+    } else msgit++;
+  }
+
   //we do not have enough memory to store every path for every message
   //hence, we repeat the entire computation :)
   for(round = 0; round < 2; round++) {
@@ -1037,7 +1049,7 @@ void model() {
     bool expand = true;
 
     int iter;
-    for(iter = 0; iter < 100 && expand; iter++) {
+    for(iter = 0; iter < MAX_ITERS && expand; iter++) {
       expand = false;
 
       //reset needed to zero
@@ -1124,7 +1136,7 @@ inline void updateMessageAndLinks() {
   }
 }
 
-#endif // DIRECT_ROUTING
+#endif // !DIRECT_ROUTING
 
 inline void markExpansionRequests() {
   //mark all links
