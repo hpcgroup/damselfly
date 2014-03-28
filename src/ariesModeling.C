@@ -1,4 +1,4 @@
- #include <cstdio>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -9,7 +9,7 @@
 #include <cfloat>
 
 #ifndef STATIC_ROUTING
-#define STATIC_ROUTING 1
+#define STATIC_ROUTING 0
 #endif
 
 #ifndef DIRECT_ROUTING
@@ -18,7 +18,7 @@
 
 using namespace std;
 
-#define USE_THREADS 1
+#define USE_THREADS 0
 
 #if USE_THREADS
 #include <omp.h>
@@ -59,17 +59,25 @@ using namespace std;
 unsigned rand_seed;
 
 inline void mysrand(unsigned seed) {
-  rand_seed = seed;
+  //rand_seed = seed;
+  srand(seed);
 }
 
 inline unsigned myrand () {
-   rand_seed = A_PRIME * (rand_seed) + B_PRIME;
-   return rand_seed;
+   //rand_seed = A_PRIME * (rand_seed) + B_PRIME;
+   //return rand_seed;
+   return rand();
 }
 
 inline unsigned myrand_r (unsigned *seed) {
-   *seed = A_PRIME * (*seed) + B_PRIME;
-   return *seed;
+   //*seed = A_PRIME * (*seed) + B_PRIME;
+   //return *seed;
+#if USE_THREADS
+   for(int i = 0; i < omp_get_num_threads() - 1; i++) {
+     rand_r(seed);
+   }
+#endif
+   return rand_r(seed);
 }
 
 // coordinates
@@ -515,7 +523,10 @@ inline void addLoads() {
     printf("Number of threads %d\n",omp_get_num_threads());
   }
 
-  unsigned lseed = primes[omp_get_thread_num()];
+  unsigned lseed = primes[0];
+  for(int i = 0; i < omp_get_thread_num(); i++) {
+    rand_r(&lseed);
+  }
   #endif
 
   for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
@@ -598,10 +609,10 @@ inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum, Path 
     valiantNode.coords[TIER2] = valiantNum / maxCoords.coords[TIER3];
     valiantNode.coords[TIER3] = valiantNum % maxCoords.coords[TIER3];
     coordstoAriesRank(valiantNum, valiantNode);
-    if(valiantNum != srcNum) {
+    if(valiantNum != aries[srcNum].localRank) {
       addIntraPath(src, srcNum, valiantNode, valiantNum, p, seed);
     }
-    if(valiantNum != dstNum) {
+    if(valiantNum != aries[dstNum].localRank) {
       addIntraPath(valiantNode, valiantNum, dst, dstNum, p, seed);
     }
   } else { //different groups
