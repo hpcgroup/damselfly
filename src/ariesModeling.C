@@ -16,7 +16,9 @@
 #define DIRECT_ROUTING 0
 #endif
 
+#ifndef USE_THREADS
 #define USE_THREADS 0
+#endif
 
 #if !STATIC_ROUTING || DIRECT_ROUTING
 #if USE_THREADS
@@ -44,14 +46,14 @@ using namespace std;
 #define BLUE_END 32
 
 #define GREEN_BW 5120
-#define BLACK_BW 15360
-#define BLUE_BW 12288
+#define BLACK_BW 5120
+#define BLUE_BW 5120
 
 #define PCI_BW 16384
 
 #define PACKET_SIZE 64
 
-#define CUTOFF_BW .01
+#define CUTOFF_BW 0.001
 #define NUM_ITERS 100
 #define PATHS_PER_ITER 4
 #define MAX_ITERS 150
