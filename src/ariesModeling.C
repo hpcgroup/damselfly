@@ -131,6 +131,7 @@ Coords maxCoords; //dimensionality
 Coords *coords; // rank to coordinates
 Aries *aries; // link status of current nodes
 int ariesPerGroup;
+FILE *outputFile;
 
 //forward declaration
 void model();
@@ -204,6 +205,9 @@ int main(int argc, char**argv) {
 
   FILE *commfile = fopen(argv[3], "r");
   nulltest((void*)commfile, "communication file");
+
+  outputFile = fopen(argv[4], "w");
+  nulltest((void*)outputFile, "output file");
 
   fscanf(conffile, "%d", &numAries);
   positivetest((double)numAries, "number of Aries routers");
@@ -301,6 +305,7 @@ int main(int argc, char**argv) {
 inline void printStats() {
   myreal maxLoad = 0, minLoad = FLT_MAX, maxPCI = 0, minPCI = FLT_MAX;
   double totalLinkLoad = 0, totalPCILoad = 0;
+  unsigned long long linkCount = 0;
   for(int i = 0; i < numAries; i++) {
     for(int j = 0; j < 4; j++) {
       maxPCI = MAX(maxPCI, aries[i].pciSO[j]);
@@ -313,11 +318,14 @@ inline void printStats() {
     }
 
     for(int j = 0; j < BLUE_END; j++) {
+      fprintf(outputFile, "%llu %lf\n", linkCount++, aries[i].linksO[j]);
       maxLoad = MAX(maxLoad, aries[i].linksO[j]);
       minLoad = MIN(minLoad, aries[i].linksO[j]);
       totalLinkLoad += aries[i].linksO[j];
     }
   }
+
+  fclose(outputFile);
 
   long long totalLinks = numAries*(15+5+((numAries/ariesPerGroup) + (numAries % ariesPerGroup) ? 1 : 0));
 
