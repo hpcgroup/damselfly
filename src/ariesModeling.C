@@ -51,12 +51,12 @@ using namespace std;
 
 #define PCI_BW 16384
 
-#define PACKET_SIZE 64
+#define PACKET_SIZE 128
 
 #define CUTOFF_BW 0.001
-#define NUM_ITERS 100
+#define NUM_ITERS 50
 #define PATHS_PER_ITER 4
-#define MAX_ITERS 150
+#define MAX_ITERS 100
 
 #define MAX(a,b) (((a)>(b))?(a):(b))
 #define MIN(a,b) (((a)<(b))?(a):(b))
@@ -125,6 +125,7 @@ typedef struct Msg {
 
 int numMsgs; // number of messages to be sent
 list<Msg> msgs; // messages left to be routed
+vector<Msg> msgsV; // messages left to be routed
 int numAries; // number of Aries in the system
 int numPEs; // number of ranks = numAries * product of last 2 coords
 Coords maxCoords; //dimensionality
@@ -517,7 +518,11 @@ void addFullPaths(vector< Path > & paths, Coords src, int srcNum, Coords &dst, i
 }
 #else // not using DIRECT_ROUTING
 
-int primes[] = {2, 1399, 2161, 4051, 5779, 6911, 7883, 10141, 12163, 13309, 15121, 16889, 18311, 20443, 21169, 23029};
+int primes[] = {2, 1399, 2161, 4051, 5779, 6911, 7883, 10141,
+                       12163, 13309, 15121, 16889, 18311, 20443, 21169, 23029,
+                       24923, 25763, 26539, 27743, 28433, 29023, 29633, 30637,
+                       31063, 31859, 32401, 33013, 33359, 33961, 34613, 35423,
+                       36007, 36929, 37871, 38903, 39761, 40357, 40933, 41357};
 inline void addLoads() {
   unsigned seed = time(NULL);
   mysrand(seed);
@@ -759,6 +764,20 @@ void model() {
     }
   }
 
+  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
+    Msg &currmsg = *msgit;
+    Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
+     if(!(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]
+      && src.coords[TIER3] == dst.coords[TIER3])) {
+      msgsV.push_back(currmsg);
+     }
+  }
+
+  // free memory
+  {
+    list<Msg>().swap(msgs);
+  }
+
   // intial set up
   addPathsToMsgs();
   markExpansionRequests();
@@ -816,8 +835,8 @@ void model() {
 }
 
 inline void updateMessageAndLinks() {
-  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
-    Msg &currmsg = *msgit;
+  for(int m = 0; m < msgsV.size(); m++) {
+    Msg &currmsg = msgsV[m];
     for(int i = 0; i < currmsg.paths.size(); i++) {
       if(currmsg.expand[i]) {
         myreal min = FLT_MAX;
@@ -840,8 +859,8 @@ inline void updateMessageAndLinks() {
 }
 
 inline void computeSummary() {
-  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
-    Msg &currmsg = *msgit;
+  for(int m = 0; m < msgsV.size(); m++) {
+    Msg &currmsg = msgsV[m];
     aries[currmsg.src].pciSO[currmsg.srcPCI] += currmsg.bytes;
     aries[currmsg.dst].pciRO[currmsg.dstPCI] += currmsg.bytes;
     for(int i = 0; i < currmsg.paths.size(); i++) {
@@ -854,15 +873,9 @@ inline void computeSummary() {
 }
 
 inline void addPathsToMsgs() {
-  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end();) {
-    Msg &currmsg = *msgit;
+  for(int m = 0; m < msgsV.size(); m++) {
+    Msg &currmsg = msgsV[m];
     Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
-    //if same aries, remove message from list
-    if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]
-      && src.coords[TIER3] == dst.coords[TIER3]) {
-       msgit = msgs.erase(msgit);
-       continue;
-    }
 
     //in the same lowest tier - direct connection
     if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]) {
@@ -895,7 +908,6 @@ inline void addPathsToMsgs() {
       currmsg.loads.resize(currmsg.paths.size(), 1.0/currmsg.paths.size());
       currmsg.allocated.resize(currmsg.paths.size(), 0.0);
     }
-    msgit++;
   }
 }
 
@@ -1015,15 +1027,18 @@ int round;
 void model() {
   long long seed = time(NULL);
 
-  //delete self messages
-  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); ) {
+for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
     Msg &currmsg = *msgit;
     Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
-     if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]
-      && src.coords[TIER3] == dst.coords[TIER3]) {
-      msgit = msgs.erase(msgit );
-      continue;
-    } else msgit++;
+     if(!(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]
+      && src.coords[TIER3] == dst.coords[TIER3])) {
+      msgsV.push_back(currmsg);
+     }
+  }
+
+  // free memory
+  {
+    list<Msg>().swap(msgs);
   }
 
   //we do not have enough memory to store every path for every message
@@ -1048,8 +1063,8 @@ void model() {
     // intial set up
     addPathsToMsgs();
     //set load, expansion
-    for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
-      Msg &currmsg = *msgit;
+    for(int m = 0; m < msgsV.size(); m++) {
+      Msg &currmsg = msgsV[m];
       currmsg.expand.resize(PATHS_PER_ITER, true);
       currmsg.loads.resize(PATHS_PER_ITER, 1.0/PATHS_PER_ITER);
     }
@@ -1107,8 +1122,8 @@ void model() {
 }
 
 inline void addPathsToMsgs() {
-  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
-    Msg &currmsg = *msgit;
+  for(int m = 0; m < msgsV.size(); m++) {
+    Msg &currmsg = msgsV[m];
     Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
     currmsg.paths.clear();
     currmsg.paths.resize(PATHS_PER_ITER);
@@ -1119,8 +1134,8 @@ inline void addPathsToMsgs() {
 }
 
 inline void updateMessageAndLinks() {
-  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
-    Msg &currmsg = *msgit;
+  for(int m = 0; m < msgsV.size(); m++) {
+    Msg &currmsg = msgsV[m];
     for(int i = 0; i < currmsg.paths.size(); i++) {
       if(currmsg.expand[i]) {
         myreal min = FLT_MAX;
@@ -1153,8 +1168,8 @@ inline void updateMessageAndLinks() {
 
 inline void markExpansionRequests() {
   //mark all links
-  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
-    Msg &currmsg = *msgit;
+  for(int m = 0; m < msgsV.size(); m++) {
+    Msg &currmsg = msgsV[m];
     for(int i = 0; i < currmsg.paths.size(); i++) {
       if(currmsg.expand[i]) {
         aries[currmsg.src].pciSO[currmsg.srcPCI] += currmsg.loads[i];
@@ -1168,9 +1183,8 @@ inline void markExpansionRequests() {
 }
 
 void selectExpansionRequests(bool & expand) {
-  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
-    Msg &currmsg = *msgit;
-
+  for(int m = 0; m < msgsV.size(); m++) {
+    Msg &currmsg = msgsV[m];
     if(aries[currmsg.src].pciSB[currmsg.srcPCI] < CUTOFF_BW || aries[currmsg.dst].pciRB[currmsg.dstPCI] < CUTOFF_BW) {
       for(int i = 0; i < currmsg.paths.size(); i++) {
         currmsg.expand[i] = false;
