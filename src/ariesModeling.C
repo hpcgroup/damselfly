@@ -1089,6 +1089,7 @@ void model() {
           }
         }
       }
+      addPathsToMsgs();
       selectExpansionRequests(expand);
       markExpansionRequests();
       updateMessageAndLinks();
