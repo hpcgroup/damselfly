@@ -20,9 +20,9 @@
 #define USE_THREADS 0
 #endif
 
-#if !STATIC_ROUTING || DIRECT_ROUTING
+#if STATIC_ROUTING && DIRECT_ROUTING
 #if USE_THREADS
-#error Can not compile threaded version without static and indirect routing
+#error Can not compile threaded version with static and direct routing
 #endif
 #endif
 
@@ -96,9 +96,9 @@ typedef struct Coords {
 
 typedef struct Aries {
   myreal linksO[32]; // 0-15 Green, 16-21 Black
-  myreal linksB[32]; //remaining link bandwidth
+  myreal linksB[32], linksB_t[32]; //remaining link bandwidth
   myreal pciSO[4], pciRO[4]; //send and recv PCI
-  myreal pciSB[4], pciRB[4]; //remaining PCI bandwidth
+  myreal pciSB[4], pciRB[4], pciSB_t[4], pciRB_t[4]; //remaining PCI bandwidth
   int localRank; //rank within the group
 #if !STATIC_ROUTING && !DIRECT_ROUTING
   myreal linksSum[32]; //needed to continously get traffic
@@ -792,11 +792,14 @@ void model() {
     //reset needed to zero
     for(int i = 0; i < numAries; i++) {
       for(int j = 0; j < 4; j++) {
-        aries[i].pciSO[j] = 0;
-        aries[i].pciRO[j] = 0;
+        aries[i].pciSB[j] -= aries[i].pciSB_t[j];
+        aries[i].pciRB[j] -= aries[i].pciRB_t[j];
+        aries[i].pciSB_t[j] = aries[i].pciSO[j] = 0;
+        aries[i].pciRB_t[j] = aries[i].pciRO[j] = 0;
       }
       for(int j = 0; j < BLUE_END; j++) {
-        aries[i].linksO[j] = 0;
+        aries[i].linksB[j] -= aries[i].linksB_t[j];
+        aries[i].linksB_t[j] = aries[i].linksO[j] = 0;
       }
     }
 
@@ -847,10 +850,10 @@ inline void updateMessageAndLinks() {
         min = MIN(min, (currmsg.loads[i]/aries[currmsg.dst].pciRO[currmsg.dstPCI])*aries[currmsg.dst].pciRB[currmsg.dstPCI]);
 
         for(int j = 0; j < currmsg.paths[i].size(); j++) {
-          aries[currmsg.paths[i][j].aries].linksB[currmsg.paths[i][j].link] -= min;
+          aries[currmsg.paths[i][j].aries].linksB_t[currmsg.paths[i][j].link] += min;
         }
-        aries[currmsg.src].pciSB[currmsg.srcPCI] -= min;
-        aries[currmsg.dst].pciRB[currmsg.dstPCI] -= min;
+        aries[currmsg.src].pciSB_t[currmsg.srcPCI] += min;
+        aries[currmsg.dst].pciRB_t[currmsg.dstPCI] += min;
         currmsg.bw +=  min;
         currmsg.allocated[i] += min;
       }
@@ -1082,11 +1085,14 @@ for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
       //reset needed to zero
       for(int i = 0; i < numAries; i++) {
         for(int j = 0; j < 4; j++) {
-          aries[i].pciSO[j] = 0;
-          aries[i].pciRO[j] = 0;
+          aries[i].pciSB[j] -= aries[i].pciSB_t[j];
+          aries[i].pciRB[j] -= aries[i].pciRB_t[j];
+          aries[i].pciSB_t[j] = aries[i].pciSO[j] = 0;
+          aries[i].pciRB_t[j] = aries[i].pciRO[j] = 0;
         }
         for(int j = 0; j < BLUE_END; j++) {
-          aries[i].linksO[j] = 0;
+          aries[i].linksB[j] -= aries[i].linksB_t[j];
+          aries[i].linksB_t[j] = aries[i].linksO[j] = 0;
         }
       }
 
@@ -1146,10 +1152,10 @@ inline void updateMessageAndLinks() {
         min = MIN(min, (currmsg.loads[i]/aries[currmsg.dst].pciRO[currmsg.dstPCI])*aries[currmsg.dst].pciRB[currmsg.dstPCI]);
 
         for(int j = 0; j < currmsg.paths[i].size(); j++) {
-          aries[currmsg.paths[i][j].aries].linksB[currmsg.paths[i][j].link] -= min;
+          aries[currmsg.paths[i][j].aries].linksB_t[currmsg.paths[i][j].link] += min;
         }
-        aries[currmsg.src].pciSB[currmsg.srcPCI] -= min;
-        aries[currmsg.dst].pciRB[currmsg.dstPCI] -= min;
+        aries[currmsg.src].pciSB_t[currmsg.srcPCI] += min;
+        aries[currmsg.dst].pciRB_t[currmsg.dstPCI] += min;
 
         if(round == 0) {
           currmsg.bw +=  min;
