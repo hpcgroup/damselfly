@@ -292,7 +292,8 @@ int main(int argc, char**argv) {
   }
 
   gettimeofday(&endRead, NULL);
-  calculateAndPrint(startRead, endRead, "time to read communication pattern");
+  if(!myRank)
+    calculateAndPrint(startRead, endRead, "time to read communication pattern");
 
   if(!myRank) {
     printf("Modeling for following system will be performed:\n");
@@ -306,7 +307,9 @@ int main(int argc, char**argv) {
   gettimeofday(&startModel, NULL);
   model();
   gettimeofday(&endModel, NULL);
-  calculateAndPrint(startModel, endModel, "time to model");
+  if(myRank) {
+    calculateAndPrint(startModel, endModel, "time to model");
+  }
 
   fclose(conffile);
   if(mapfile != NULL)
