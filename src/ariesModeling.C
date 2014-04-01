@@ -891,6 +891,10 @@ void model() {
     selectExpansionRequests(expand);
     markExpansionRequests();
     updateMessageAndLinks();
+    int expandl = (expand) ? 1 : 0;
+    int globale;
+    MPI_Allreduce(&expandl, &globale, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD);
+    expand = (globale > 0) ? true : false;
   }
 
   for(int i = 0; i < numAries; i++) {
