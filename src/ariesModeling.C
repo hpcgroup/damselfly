@@ -305,7 +305,7 @@ int main(int argc, char**argv) {
   gettimeofday(&startModel, NULL);
   model();
   gettimeofday(&endModel, NULL);
-  if(myRank) {
+  if(!myRank) {
     calculateAndPrint(startModel, endModel, "time to model");
   }
 
