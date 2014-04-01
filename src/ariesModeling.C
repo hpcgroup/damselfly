@@ -313,8 +313,11 @@ int main(int argc, char**argv) {
   if(mapfile != NULL)
     fclose(mapfile);
   fclose(commfile);
+  MPI_Barrier(MPI_COMM_WORLD);
+  MPI_Finalize();
   delete[] aries;
   delete[] coords;
+  exit(0);
 }
 
 inline void printStats() {
@@ -337,10 +340,7 @@ inline void printStats() {
   printf("******************Summary*****************\n");
   printf("STATIC_ROUTING %d DIRECT_ROUTING %d\n",STATIC_ROUTING,DIRECT_ROUTING);
   printf("maxLoad %.2f MB -- minLoad %.2f MB\n",maxLoad,minLoad);
-  printf("averageLinkLoad %.2lf \n", totalLinkLoad/totalLinks);
-  MPI_Barrier(MPI_COMM_WORLD);
-  MPI_Finalize();
-  exit(0);
+  printf("averageLinkLoad %.2lf MB \n", totalLinkLoad/totalLinks);
 }
 
 #if STATIC_ROUTING
