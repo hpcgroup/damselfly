@@ -1182,7 +1182,7 @@ void model() {
     int iter;
     for(iter = 0; iter < MAX_ITERS && expand; iter++) {
       expand = false;
-      if(iter % 50 == 0)
+      if(!myRank && iter % 50 == 0)
         printf("Iter %d\n",iter);
 
       unsigned long long linkCount = 0;
@@ -1248,7 +1248,8 @@ void model() {
       MPI_Allreduce(&expandl, &globale, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD);
       expand = (globale > 0) ? true : false;
     }
-    printf("Number of iterations executed: %d\n", iter);
+    if(!myRank)
+      printf("Number of iterations executed: %d\n", iter);
   }
 
   unsigned long long linkCount = 0;
