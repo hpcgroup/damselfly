@@ -13,6 +13,10 @@
 #define STATIC_ROUTING 0
 #endif
 
+#ifndef DIRECT_ROUTING
+#define DIRECT_ROUTING 0
+#endif
+
 using namespace std;
 
 #define TIER1 0
@@ -37,7 +41,7 @@ using namespace std;
 #define PACKET_SIZE 64
 
 #define CUTOFF_BW 0.001
-#define NUM_ITERS 50
+#define NUM_ITERS 70
 #define PATHS_PER_ITER 4
 #define MAX_ITERS 150
 
@@ -368,8 +372,8 @@ int main(int argc, char**argv) {
 }
 
 inline void printStats() {
-  myreal maxLoad = 0, minLoad = FLT_MAX, maxPCI = 0, minPCI = FLT_MAX;
-  double totalLinkLoad = 0, totalPCILoad = 0;
+  myreal maxLoad = 0, minLoad = FLT_MAX;
+  double totalLinkLoad = 0;
   unsigned long long linkCount = 0;
   for(int i = 0; i < numAries; i++) {
     for(int j = 0; j < BLUE_END; j++) {
@@ -424,8 +428,8 @@ inline void addLoads() {
   for(vector<Msg>::iterator msgit = msgsV.begin(); msgit != msgsV.end(); msgit++) {
     Msg &currmsg = *msgit;
     myreal perPath = currmsg.bytes/currmsg.paths.size();
-    for(int i = 0; i < currmsg.paths.size(); i++) {
-      for(int j = 0; j < currmsg.paths[i].size(); j++) {
+    for(size_t i = 0; i < currmsg.paths.size(); i++) {
+      for(size_t j = 0; j < currmsg.paths[i].size(); j++) {
         aries[currmsg.paths[i][j].aries].linksO[currmsg.paths[i][j].link] += perPath;
       }
     }
@@ -632,6 +636,7 @@ inline void addLoads() {
       }
     }
   }
+
   double *loads = new double[numAries*BLUE_END];
   memset(loads, 0, sizeof(double)*numAries*BLUE_END);
   unsigned long long linkCount = 0;
@@ -646,6 +651,7 @@ inline void addLoads() {
     sumLoads = new double[numAries*BLUE_END];
     memset(sumLoads, 0, sizeof(double)*numAries*BLUE_END);
   }
+
   MPI_Reduce(loads, sumLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
   delete[] loads;
 
@@ -920,18 +926,18 @@ inline void updateMessageAndLinks() {
     }
   }
 
-  for(int m = 0; m < msgsV.size(); m++) {
+  for(size_t m = 0; m < msgsV.size(); m++) {
     Msg &currmsg = msgsV[m];
-    for(int i = 0; i < currmsg.paths.size(); i++) {
+    for(size_t i = 0; i < currmsg.paths.size(); i++) {
       if(currmsg.expand[i]) {
         myreal min = FLT_MAX;
-        for(int j = 0; j < currmsg.paths[i].size(); j++) {
+        for(size_t j = 0; j < currmsg.paths[i].size(); j++) {
           min = MIN(min, (currmsg.loads[i]/aries[currmsg.paths[i][j].aries].linksO[currmsg.paths[i][j].link])*aries[currmsg.paths[i][j].aries].linksB[currmsg.paths[i][j].link]);
         }
         min = MIN(min, (currmsg.loads[i]/aries[currmsg.src].pciSO[currmsg.srcPCI])*aries[currmsg.src].pciSB[currmsg.srcPCI]);
         min = MIN(min, (currmsg.loads[i]/aries[currmsg.dst].pciRO[currmsg.dstPCI])*aries[currmsg.dst].pciRB[currmsg.dstPCI]);
 
-        for(int j = 0; j < currmsg.paths[i].size(); j++) {
+        for(size_t j = 0; j < currmsg.paths[i].size(); j++) {
           aries[currmsg.paths[i][j].aries].linksB_t[currmsg.paths[i][j].link] += min;
         }
         aries[currmsg.src].pciSB_t[currmsg.srcPCI] += min;
@@ -944,13 +950,13 @@ inline void updateMessageAndLinks() {
 }
 
 inline void computeSummary() {
-  for(int m = 0; m < msgsV.size(); m++) {
+  for(size_t m = 0; m < msgsV.size(); m++) {
     Msg &currmsg = msgsV[m];
     aries[currmsg.src].pciSO[currmsg.srcPCI] += currmsg.bytes;
     aries[currmsg.dst].pciRO[currmsg.dstPCI] += currmsg.bytes;
-    for(int i = 0; i < currmsg.paths.size(); i++) {
+    for(size_t i = 0; i < currmsg.paths.size(); i++) {
       myreal pathLoad = currmsg.bytes*(currmsg.allocated[i]/currmsg.bw);
-      for(int j = 0; j < currmsg.paths[i].size(); j++) {
+      for(size_t j = 0; j < currmsg.paths[i].size(); j++) {
         aries[currmsg.paths[i][j].aries].linksO[currmsg.paths[i][j].link] += pathLoad;
       }
     }
@@ -989,7 +995,7 @@ inline void computeSummary() {
 }
 
 inline void addPathsToMsgs() {
-  for(int m = 0; m < msgsV.size(); m++) {
+  for(size_t m = 0; m < msgsV.size(); m++) {
     Msg &currmsg = msgsV[m];
     Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
 
@@ -1168,7 +1174,7 @@ void model() {
     // intial set up
     addPathsToMsgs();
     //set load, expansion
-    for(int m = 0; m < msgsV.size(); m++) {
+    for(size_t m = 0; m < msgsV.size(); m++) {
       Msg &currmsg = msgsV[m];
       currmsg.expand.resize(PATHS_PER_ITER, true);
       currmsg.loads.resize(PATHS_PER_ITER, 1.0/PATHS_PER_ITER);
@@ -1267,6 +1273,7 @@ void model() {
       aries[i].linksO[j] = linkLoads[linkCount++];
     }
   }
+
   if(myRank) {
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Finalize();
@@ -1277,7 +1284,7 @@ void model() {
 }
 
 inline void addPathsToMsgs() {
-  for(int m = 0; m < msgsV.size(); m++) {
+  for(size_t m = 0; m < msgsV.size(); m++) {
     Msg &currmsg = msgsV[m];
     Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
     currmsg.paths.clear();
@@ -1316,9 +1323,9 @@ inline void updateMessageAndLinks() {
     }
   }
 
-  for(int m = 0; m < msgsV.size(); m++) {
+  for(size_t m = 0; m < msgsV.size(); m++) {
     Msg &currmsg = msgsV[m];
-    for(int i = 0; i < currmsg.paths.size(); i++) {
+    for(size_t i = 0; i < currmsg.paths.size(); i++) {
       if(currmsg.expand[i]) {
         myreal min = FLT_MAX;
         for(int j = 0; j < currmsg.paths[i].size(); j++) {
@@ -1327,7 +1334,7 @@ inline void updateMessageAndLinks() {
         min = MIN(min, (currmsg.loads[i]/aries[currmsg.src].pciSO[currmsg.srcPCI])*aries[currmsg.src].pciSB[currmsg.srcPCI]);
         min = MIN(min, (currmsg.loads[i]/aries[currmsg.dst].pciRO[currmsg.dstPCI])*aries[currmsg.dst].pciRB[currmsg.dstPCI]);
 
-        for(int j = 0; j < currmsg.paths[i].size(); j++) {
+        for(size_t j = 0; j < currmsg.paths[i].size(); j++) {
           aries[currmsg.paths[i][j].aries].linksB_t[currmsg.paths[i][j].link] += min;
         }
         aries[currmsg.src].pciSB_t[currmsg.srcPCI] += min;
@@ -1337,7 +1344,7 @@ inline void updateMessageAndLinks() {
           currmsg.bw +=  min;
         } else {
           myreal pathLoad = currmsg.bytes*(min/currmsg.bw);
-          for(int j = 0; j < currmsg.paths[i].size(); j++) {
+          for(size_t j = 0; j < currmsg.paths[i].size(); j++) {
             aries[currmsg.paths[i][j].aries].linksSum[currmsg.paths[i][j].link] += pathLoad;
           }
         }
@@ -1350,7 +1357,7 @@ inline void updateMessageAndLinks() {
 
 inline void markExpansionRequests() {
   //mark all links
-  for(int m = 0; m < msgsV.size(); m++) {
+  for(size_t m = 0; m < msgsV.size(); m++) {
     Msg &currmsg = msgsV[m];
     for(int i = 0; i < currmsg.paths.size(); i++) {
       if(currmsg.expand[i]) {
@@ -1365,7 +1372,7 @@ inline void markExpansionRequests() {
 }
 
 void selectExpansionRequests(bool & expand) {
-  for(int m = 0; m < msgsV.size(); m++) {
+  for(size_t m = 0; m < msgsV.size(); m++) {
     Msg &currmsg = msgsV[m];
     if(aries[currmsg.src].pciSB[currmsg.srcPCI] < CUTOFF_BW || aries[currmsg.dst].pciRB[currmsg.dstPCI] < CUTOFF_BW) {
       for(int i = 0; i < currmsg.paths.size(); i++) {
@@ -1376,7 +1383,7 @@ void selectExpansionRequests(bool & expand) {
 
     myreal sum = 0;
 
-    for(int i = 0; i < currmsg.paths.size(); i++) {
+    for(size_t i = 0; i < currmsg.paths.size(); i++) {
       currmsg.loads[i] = FLT_MAX;
       for(int j = 0; j < currmsg.paths[i].size(); j++) {
         currmsg.loads[i] = MIN(currmsg.loads[i], aries[currmsg.paths[i][j].aries].linksB[currmsg.paths[i][j].link]);
@@ -1384,7 +1391,7 @@ void selectExpansionRequests(bool & expand) {
       sum += currmsg.loads[i];
     }
 
-    for(int i = 0; i < currmsg.paths.size(); i++) {
+    for(size_t i = 0; i < currmsg.paths.size(); i++) {
       if(currmsg.loads[i] < CUTOFF_BW) {
         currmsg.expand[i] = false;
       } else {
