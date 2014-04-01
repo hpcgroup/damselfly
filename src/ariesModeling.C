@@ -801,6 +801,9 @@ inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum, Path
 
 #if !STATIC_ROUTING
 #if DIRECT_ROUTING
+
+double *linkLoads, *pciLoads;
+
 void model() {
   memset(aries, 0, numAries*sizeof(Aries));
   //initialize upper bounds
@@ -817,19 +820,8 @@ void model() {
     }
   }
 
-  for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
-    Msg &currmsg = *msgit;
-    Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
-     if(!(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]
-      && src.coords[TIER3] == dst.coords[TIER3])) {
-      msgsV.push_back(currmsg);
-     }
-  }
-
-  // free memory
-  {
-    list<Msg>().swap(msgs);
-  }
+  linkLoads = new double[numAries*BLUE_END];
+  pciLoads  = new double[numAries*8];
 
   // intial set up
   addPathsToMsgs();
@@ -842,7 +834,33 @@ void model() {
   for(iter = 0; iter < MAX_ITERS && expand; iter++) {
     expand = false;
 
-    //reset needed to zero
+    unsigned long long linkCount = 0;
+    unsigned long long pciCount = 0;
+    for(int i = 0; i < numAries; i++) {
+      for(int j = 0; j < 4; j++) {
+        pciLoads[pciCount++] = aries[i].pciSB_t[j];
+        pciLoads[pciCount++] = aries[i].pciRB_t[j];
+      }
+      for(int j = 0; j < BLUE_END; j++) {
+        linkLoads[linkCount++] = aries[i].linksB_t[j];
+      }
+    }
+
+    MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(MPI_IN_PLACE, pciLoads, numAries*8, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+    linkCount = 0;
+    pciCount = 0;
+    for(int i = 0; i < numAries; i++) {
+      for(int j = 0; j < 4; j++) {
+        aries[i].pciSB_t[j] = pciLoads[pciCount++];
+        aries[i].pciRB_t[j] = pciLoads[pciCount++];
+      }
+      for(int j = 0; j < BLUE_END; j++) {
+        aries[i].linksB_t[j] = linkLoads[linkCount++];
+      }
+    }
+
     for(int i = 0; i < numAries; i++) {
       for(int j = 0; j < 4; j++) {
         aries[i].pciSB[j] -= aries[i].pciSB_t[j];
@@ -885,12 +903,40 @@ void model() {
     }
   }
 
-  printf("Number of iterations executed: %d\n", iter);
+  if(!myRank)
+    printf("Number of iterations executed: %d\n", iter);
   computeSummary();
   printStats();
 }
 
 inline void updateMessageAndLinks() {
+  unsigned long long linkCount = 0;
+  unsigned long long pciCount = 0;
+  for(int i = 0; i < numAries; i++) {
+    for(int j = 0; j < 4; j++) {
+      pciLoads[pciCount++] = aries[i].pciSO[j];
+      pciLoads[pciCount++] = aries[i].pciRO[j];
+    }
+    for(int j = 0; j < BLUE_END; j++) {
+      linkLoads[linkCount++] = aries[i].linksO[j];
+    }
+  }
+
+  MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, pciLoads, numAries*8, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+  linkCount = 0;
+  pciCount = 0;
+  for(int i = 0; i < numAries; i++) {
+    for(int j = 0; j < 4; j++) {
+      aries[i].pciSO[j] = pciLoads[pciCount++];
+      aries[i].pciRO[j] = pciLoads[pciCount++];
+    }
+    for(int j = 0; j < BLUE_END; j++) {
+      aries[i].linksO[j] = linkLoads[linkCount++];
+    }
+  }
+
   for(int m = 0; m < msgsV.size(); m++) {
     Msg &currmsg = msgsV[m];
     for(int i = 0; i < currmsg.paths.size(); i++) {
@@ -925,6 +971,37 @@ inline void computeSummary() {
         aries[currmsg.paths[i][j].aries].linksO[currmsg.paths[i][j].link] += pathLoad;
       }
     }
+  }
+  unsigned long long linkCount = 0;
+  unsigned long long pciCount = 0;
+  for(int i = 0; i < numAries; i++) {
+    for(int j = 0; j < 4; j++) {
+      pciLoads[pciCount++] = aries[i].pciSO[j];
+      pciLoads[pciCount++] = aries[i].pciRO[j];
+    }
+    for(int j = 0; j < BLUE_END; j++) {
+      linkLoads[linkCount++] = aries[i].linksO[j];
+    }
+  }
+
+  MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, pciLoads, numAries*8, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+  linkCount = 0;
+  pciCount = 0;
+  for(int i = 0; i < numAries; i++) {
+    for(int j = 0; j < 4; j++) {
+      aries[i].pciSO[j] = pciLoads[pciCount++];
+      aries[i].pciRO[j] = pciLoads[pciCount++];
+    }
+    for(int j = 0; j < BLUE_END; j++) {
+      aries[i].linksO[j] = linkLoads[linkCount++];
+    }
+  }
+  if(myRank) {
+    MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Finalize();
+    exit(0);
   }
 }
 
@@ -1082,20 +1159,6 @@ int round;
 
 void model() {
   long long seed = time(NULL);
-
-for(list<Msg>::iterator msgit = msgs.begin(); msgit != msgs.end(); msgit++) {
-    Msg &currmsg = *msgit;
-    Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
-     if(!(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]
-      && src.coords[TIER3] == dst.coords[TIER3])) {
-      msgsV.push_back(currmsg);
-     }
-  }
-
-  // free memory
-  {
-    list<Msg>().swap(msgs);
-  }
 
   //we do not have enough memory to store every path for every message
   //hence, we repeat the entire computation :)
