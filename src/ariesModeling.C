@@ -40,10 +40,10 @@ using namespace std;
 
 #define PACKET_SIZE 64
 
-#define CUTOFF_BW 0.001
+#define CUTOFF_BW 0.01
 #define NUM_ITERS 50
 #define PATHS_PER_ITER 4
-#define MAX_ITERS 150
+#define MAX_ITERS 200
 
 #define MAX(a,b) (((a)>(b))?(a):(b))
 #define MIN(a,b) (((a)<(b))?(a):(b))
@@ -1122,6 +1122,8 @@ void model() {
     //set load, expansion
     for(size_t m = 0; m < msgsV.size(); m++) {
       Msg &currmsg = msgsV[m];
+      currmsg.expand.clear();
+      currmsg.loads.clear();
       currmsg.expand.resize(PATHS_PER_ITER, true);
       currmsg.loads.resize(PATHS_PER_ITER, 1.0/PATHS_PER_ITER);
     }
