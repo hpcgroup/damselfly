@@ -17,6 +17,14 @@
 #define DIRECT_ROUTING 0
 #endif
 
+#define BIASED_ROUTING 1
+
+#if BIASED_ROUTING
+#if STATIC_ROUTING || DIRECT_ROUTING
+#error Cannot compile biased routing with static-direct
+#endif
+#endif
+
 using namespace std;
 
 #define TIER1 0
@@ -98,10 +106,16 @@ typedef struct Msg {
   myreal bytes; //in MB
   myreal bw; //allocated
   vector< Path > paths;
+  short dcount;
   vector< bool > expand;
   vector< myreal > loads;
   vector< myreal > allocated;
 } Msg;
+
+typedef struct MsgSDB {
+  int src, dst;
+  double bytes;
+} MsgSDB;
 
 unsigned long long numMsgs; // number of messages to be sent
 vector<Msg> msgsV; // messages left to be routed
@@ -191,7 +205,7 @@ int main(int argc, char**argv) {
 
   FILE *mapfile = fopen(argv[2],"r");
 
-  FILE *commfile = fopen(argv[3], "r");
+  FILE *commfile = fopen(argv[3], "rb");
   nulltest((void*)commfile, "communication file");
 
   outputFile = fopen(argv[4], "w");
@@ -250,15 +264,17 @@ int main(int argc, char**argv) {
   gettimeofday(&startRead, NULL);
   unsigned long long begin = (myRank*numMsgs)/numRanks;
   unsigned long long end = ((myRank+1)*numMsgs)/numRanks;
-  unsigned long long currentCount = 0;
+  unsigned long long currentCount = begin;
+  fseek(commfile, begin*16, SEEK_SET);
+  MsgSDB newMsgSDB;
+
   while(!feof(commfile)) {
     Msg newmsg;
-    fscanf(commfile, "%d %d %lf\n", &newmsg.src, &newmsg.dst, &newmsg.bytes);
+    fread(&newMsgSDB, sizeof(MsgSDB), 1, commfile);
+    newmsg.src = newMsgSDB.src;
+    newmsg.dst = newMsgSDB.dst;
+    newmsg.bytes = newMsgSDB.bytes;
     if(currentCount >= end) break;
-    if(currentCount < begin) {
-      currentCount++;
-      continue;
-    }
     Coords& src = coords[newmsg.src];
     Coords& dst = coords[newmsg.dst];
     if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]
@@ -441,6 +457,11 @@ inline void addPathsToMsgs() {
   }
 }
 
+#endif
+#endif
+
+#if STATIC_ROUTING || BIASED_ROUTING
+#if DIRECT_ROUTING || BIASED_ROUTING
 void addToPath(vector< Path > & paths, Coords src, int srcNum, Coords &dst, int loc1, int loc2) {
   int interAries;
   Hop h;
@@ -545,7 +566,11 @@ void addFullPaths(vector< Path > & paths, Coords src, int srcNum, Coords &dst, i
     }
   }
 }
-#else // not using DIRECT_ROUTING
+#endif
+#endif
+
+#if STATIC_ROUTING
+#if !DIRECT_ROUTING // not using DIRECT_ROUTING
 
 inline void addLoads() {
   myreal MB = 1024*1024;
@@ -1236,10 +1261,38 @@ inline void addPathsToMsgs() {
     Msg &currmsg = msgsV[m];
     Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
     currmsg.paths.clear();
+#if ! BIASED_ROUTING
     currmsg.paths.resize(PATHS_PER_ITER);
     for(int i = 0; i < PATHS_PER_ITER; i++) {
       getRandomPath(src, currmsg.src, dst, currmsg.dst, currmsg.paths[i]);
     }
+#else 
+    // add upto 2 direct paths
+    if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]) {
+      currmsg.paths.resize(1);
+      currmsg.paths[0].resize(1);
+      currmsg.paths[0][0].aries = currmsg.src;
+      currmsg.paths[0][0].link = dst.coords[TIER3]; //GREEN
+    } else if(src.coords[TIER1] == dst.coords[TIER1]) {  //in the same second tier
+      if(src.coords[TIER3] == dst.coords[TIER3]) { //aligned on tier3 - direct connection
+        currmsg.paths.resize(1);
+        currmsg.paths[0].resize(1);
+        currmsg.paths[0][0].aries = currmsg.src;
+        currmsg.paths[0][0].link = BLACK_START + dst.coords[TIER2];
+      } else { // else two paths of length 2
+        currmsg.paths.resize(2);
+        addToPath(currmsg.paths, src, currmsg.src, dst, 0, 1);
+      }
+    } else {
+      addFullPaths(currmsg.paths, src, currmsg.src, dst, currmsg.dst);
+    };
+    //add rest from indirect paths
+    currmsg.dcount = currmsg.paths.size();
+    currmsg.paths.resize(PATHS_PER_ITER);
+    for(int i = currmsg.dcount; i < PATHS_PER_ITER; i++) {
+      getRandomPath(src, currmsg.src, dst, currmsg.dst, currmsg.paths[i]);
+    }
+#endif
   }
 }
 
