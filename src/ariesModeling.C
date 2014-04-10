@@ -103,6 +103,11 @@ typedef struct Msg {
   vector< myreal > allocated;
 } Msg;
 
+typedef struct MsgSDB {
+  int src, dst;
+  double bytes;
+} MsgSDB;
+  
 unsigned long long numMsgs; // number of messages to be sent
 vector<Msg> msgsV; // messages left to be routed
 int numAries; // number of Aries in the system
@@ -191,7 +196,7 @@ int main(int argc, char**argv) {
 
   FILE *mapfile = fopen(argv[2],"r");
 
-  FILE *commfile = fopen(argv[3], "r");
+  FILE *commfile = fopen(argv[3], "rb");
   nulltest((void*)commfile, "communication file");
 
   outputFile = fopen(argv[4], "w");
@@ -250,15 +255,18 @@ int main(int argc, char**argv) {
   gettimeofday(&startRead, NULL);
   unsigned long long begin = (myRank*numMsgs)/numRanks;
   unsigned long long end = ((myRank+1)*numMsgs)/numRanks;
-  unsigned long long currentCount = 0;
+  unsigned long long currentCount = begin;
+
+  fseek(commfile, begin*16, SEEK_SET);
+  MsgSDB newMsgSDB;
+
   while(!feof(commfile)) {
     Msg newmsg;
-    fscanf(commfile, "%d %d %lf\n", &newmsg.src, &newmsg.dst, &newmsg.bytes);
+    fread(&newMsgSDB, sizeof(MsgSDB), 1, commfile);
+    newmsg.src = newMsgSDB.src;
+    newmsg.dst = newMsgSDB.dst;
+    newmsg.bytes = newMsgSDB.bytes;
     if(currentCount >= end) break;
-    if(currentCount < begin) {
-      currentCount++;
-      continue;
-    }
     Coords& src = coords[newmsg.src];
     Coords& dst = coords[newmsg.dst];
     if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]
