@@ -960,7 +960,7 @@ inline void addPathsToMsgs() {
       currmsg.paths[0][0].aries = currmsg.src;
       currmsg.paths[0][0].link = dst.coords[TIER3]; //GREEN
       currmsg.expand.push_back(true);
-      currmsg.loads.push_back(1.0);
+      currmsg.loads.push_back(currmsg.bytes);
       currmsg.allocated.push_back(0.0);
     } else if(src.coords[TIER1] == dst.coords[TIER1]) { //in the same second tier
       if(src.coords[TIER3] == dst.coords[TIER3]) { //aligned on tier3 - direct connection
@@ -969,19 +969,19 @@ inline void addPathsToMsgs() {
         currmsg.paths[0][0].aries = currmsg.src;
         currmsg.paths[0][0].link = BLACK_START + dst.coords[TIER2];
         currmsg.expand.push_back(true);
-        currmsg.loads.push_back(1.0);
+        currmsg.loads.push_back(currmsg.bytes);
         currmsg.allocated.push_back(0.0);
       } else {  // else two paths of length 2
         currmsg.paths.resize(2);
         addToPath(currmsg.paths, src, currmsg.src, dst, 0, 1);
         currmsg.expand.resize(2, true);
-        currmsg.loads.resize(2, 0.5);
+        currmsg.loads.resize(2, currmsg.bytes*0.5);
         currmsg.allocated.resize(2, 0.0);
       }
     } else {
       addFullPaths(currmsg.paths, src, currmsg.src, dst, currmsg.dst);
       currmsg.expand.resize(currmsg.paths.size(), true);
-      currmsg.loads.resize(currmsg.paths.size(), 1.0/currmsg.paths.size());
+      currmsg.loads.resize(currmsg.paths.size(), currmsg.bytes*1.0/currmsg.paths.size());
       currmsg.allocated.resize(currmsg.paths.size(), 0.0);
     }
   }
