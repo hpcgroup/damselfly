@@ -1150,7 +1150,7 @@ void model() {
       currmsg.expand.clear();
       currmsg.loads.clear();
       currmsg.expand.resize(PATHS_PER_ITER, true);
-      currmsg.loads.resize(PATHS_PER_ITER, 1.0/PATHS_PER_ITER);
+      currmsg.loads.resize(PATHS_PER_ITER, currmsg.bytes*1.0/PATHS_PER_ITER);
     }
 
     markExpansionRequests();
@@ -1397,7 +1397,7 @@ void selectExpansionRequests(bool & expand) {
         currmsg.expand[i] = false;
       } else {
         currmsg.expand[i] = true;
-        currmsg.loads[i] = currmsg.loads[i]/sum;
+        currmsg.loads[i] = currmsg.bytes*currmsg.loads[i]/sum;
         expand = true;
       }
     }
