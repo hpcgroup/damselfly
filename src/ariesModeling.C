@@ -250,54 +250,57 @@ int main(int argc, char**argv) {
   gettimeofday(&startRead, NULL);
     
   while(!feof(conffile)) {
-    char cur_comm_file[256];
+    char cur_comm_file[256] = {0};
     int cur_ranks;
 
     fscanf(conffile, "%s", cur_comm_file);
-    FILE *commfile = fopen(cur_comm_file, "rb");
-    nulltest((void*)commfile, "communication file");
-    
-    fscanf(conffile, "%d", &cur_ranks);
-    positivetest((double)cur_ranks, "number of ranks");
-    fscanf(conffile, "%llu", &numMsgs);
-    positivetest((double)numMsgs, "number of messages");
+    if(strcmp(cur_comm_file, "") != 0) {
+      FILE *commfile = fopen(cur_comm_file, "rb");
+      nulltest((void*)commfile, "communication file");
 
-    unsigned long long begin = (myRank*numMsgs)/numRanks;
-    unsigned long long end = ((myRank+1)*numMsgs)/numRanks;
-    unsigned long long currentCount = begin;
-    fseek(commfile, begin*16, SEEK_SET);
-    MsgSDB newMsgSDB;
-  
-    if(!myRank)
-      printf("Reading file %s\n", cur_comm_file);
+      fscanf(conffile, "%d", &cur_ranks);
+      positivetest((double)cur_ranks, "number of ranks");
+      fscanf(conffile, "%llu", &numMsgs);
+      positivetest((double)numMsgs, "number of messages");
 
-    while(!feof(commfile)) {
-      Msg newmsg;
-      fread(&newMsgSDB, sizeof(MsgSDB), 1, commfile);
-      newmsg.src = newMsgSDB.src + currRankBase;
-      newmsg.dst = newMsgSDB.dst + currRankBase;
-      newmsg.bytes = newMsgSDB.bytes;
-      if(currentCount >= end) break;
-      Coords& src = coords[newmsg.src];
-      Coords& dst = coords[newmsg.dst];
-      if(src.coords[TIER1] == dst.coords[TIER1] 
-          && src.coords[TIER2] == dst.coords[TIER2]
-          && src.coords[TIER3] == dst.coords[TIER3]) {
-        currentCount++;
-        continue;
+      unsigned long long begin = (myRank*numMsgs)/numRanks;
+      unsigned long long end = ((myRank+1)*numMsgs)/numRanks;
+      unsigned long long currentCount = begin;
+      fseek(commfile, begin*16, SEEK_SET);
+      MsgSDB newMsgSDB;
+
+      if(!myRank)
+        printf("Reading  %s %d %llu\n", cur_comm_file, numRanks, numMsgs);
+
+      while(!feof(commfile)) {
+        Msg newmsg;
+        if(fread(&newMsgSDB, sizeof(MsgSDB), 1, commfile) != 0) {
+          newmsg.src = newMsgSDB.src + currRankBase;
+          newmsg.dst = newMsgSDB.dst + currRankBase;
+          newmsg.bytes = newMsgSDB.bytes;
+          if(currentCount >= end) break;
+          Coords& src = coords[newmsg.src];
+          Coords& dst = coords[newmsg.dst];
+          if(src.coords[TIER1] == dst.coords[TIER1] 
+              && src.coords[TIER2] == dst.coords[TIER2]
+              && src.coords[TIER3] == dst.coords[TIER3]) {
+            currentCount++;
+            continue;
+          }
+          newmsg.bytes /= MB;
+          newmsg.srcPCI = coords[newmsg.src].coords[NUM_LEVELS];
+          newmsg.dstPCI = coords[newmsg.dst].coords[NUM_LEVELS];
+          coordstoAriesRank(newmsg.src, coords[newmsg.src]);
+          coordstoAriesRank(newmsg.dst, coords[newmsg.dst]);
+          newmsg.bw = 0;
+          msgsV.push_back(newmsg);
+          sum += newmsg.bytes;
+          currentCount++;
+        }
       }
-      newmsg.bytes /= MB;
-      newmsg.srcPCI = coords[newmsg.src].coords[NUM_LEVELS];
-      newmsg.dstPCI = coords[newmsg.dst].coords[NUM_LEVELS];
-      coordstoAriesRank(newmsg.src, coords[newmsg.src]);
-      coordstoAriesRank(newmsg.dst, coords[newmsg.dst]);
-      newmsg.bw = 0;
-      msgsV.push_back(newmsg);
-      sum += newmsg.bytes;
-      currentCount++;
+      currRankBase = cur_ranks;
+      fclose(commfile);
     }
-    currRankBase = cur_ranks;
-    fclose(commfile);
   }
   fclose(conffile);
 
