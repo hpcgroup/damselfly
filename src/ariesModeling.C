@@ -46,19 +46,14 @@ typedef double myreal;
 unsigned rand_seed;
 
 inline void mysrand(unsigned seed) {
-  //rand_seed = seed;
   srand(seed);
 }
 
 inline unsigned myrand () {
-   //rand_seed = A_PRIME * (rand_seed) + B_PRIME;
-   //return rand_seed;
    return rand();
 }
 
 inline unsigned myrand_r (unsigned *seed) {
-   //*seed = A_PRIME * (*seed) + B_PRIME;
-   //return *seed;
    return rand_r(seed);
 }
 
@@ -116,11 +111,16 @@ int myRank, numRanks;
 void model();
 inline void addLoads();
 inline void addPathsToMsgs();
-inline void addToPath(vector< Path > & paths, Coords src, int srcNum, Coords &dst, int loc1, int loc2);
-inline void addFullPaths(vector< Path > & paths, Coords src, int srcNum, Coords &dst, int dstNum);
-inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum, Path & p, unsigned *seed = 0);
-inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum, Path &p, unsigned *seed = 0);
-inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum, Path &p, unsigned *seed = 0);
+inline void addToPath(vector< Path > & paths, Coords src, int srcNum, 
+    Coords &dst, int loc1, int loc2);
+inline void addFullPaths(vector< Path > & paths, Coords src, int srcNum, 
+    Coords &dst, int dstNum);
+inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum, 
+    Path & p, unsigned *seed = 0);
+inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum, 
+    Path &p, unsigned *seed = 0);
+inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum, 
+    Path &p, unsigned *seed = 0);
 inline void selectExpansionRequests(bool & expand);
 inline void markExpansionRequests();
 inline void updateMessageAndLinks();
@@ -162,7 +162,8 @@ inline void positivetest(double val, string valfor) {
   }
 }
 
-inline void calculateAndPrint(struct timeval & start, struct timeval & end, string out) {
+inline void calculateAndPrint(struct timeval & start, struct timeval & end, 
+    string out) {
   double time = 0;
   time = (end.tv_sec - start.tv_sec) * 1000;
   time += ((end.tv_usec - start.tv_usec)/1000.0);
@@ -176,7 +177,7 @@ int main(int argc, char**argv) {
   MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
 
   if(argc == 1) {
-    printf("Usage: %s <conffile> <mapfile> <commfile>\n", argv[0]);
+    printf("Usage: %s <conffile> <mapfile> <outfile>\n", argv[0]);
     exit(1);
   }
 
@@ -189,11 +190,10 @@ int main(int argc, char**argv) {
 
   FILE *mapfile = fopen(argv[2],"r");
 
-  FILE *commfile = fopen(argv[3], "rb");
-  nulltest((void*)commfile, "communication file");
-
-  outputFile = fopen(argv[4], "w");
-  nulltest((void*)outputFile, "output file");
+  if(!myRank) {
+    outputFile = fopen(argv[3], "w");
+    nulltest((void*)outputFile, "output file");
+  }
 
   fscanf(conffile, "%d", &numAries);
   positivetest((double)numAries, "number of Aries routers");
@@ -204,12 +204,10 @@ int main(int argc, char**argv) {
   }
   ariesPerGroup = maxCoords.coords[TIER2] * maxCoords.coords[TIER3];
 
-  fscanf(conffile, "%llu", &numMsgs);
-  positivetest((double)numMsgs, "number of messages");
-
   assert(numAries == (ariesPerGroup*maxCoords.coords[TIER1]));
 
-  numPEs = numAries * maxCoords.coords[NUM_LEVELS] * maxCoords.coords[NUM_LEVELS + 1];
+  numPEs = numAries * maxCoords.coords[NUM_LEVELS] * 
+           maxCoords.coords[NUM_LEVELS + 1];
 
   aries = new Aries[numAries];
   nulltest((void*)aries, "aries status array");
@@ -220,7 +218,7 @@ int main(int argc, char**argv) {
   /* Read the mapping of MPI ranks to hardware nodes */
   if(mapfile == NULL) {
     if(!myRank)
-      printf("Mapfile not provided; using default mapping\n");
+      printf("Mapfile does not exist; using default mapping\n");
     for(int i = 0; i < numPEs; i++) {
       int rank = i;
       for(int j = NUM_COORDS - 1; j >= 0; j--) {
@@ -237,45 +235,72 @@ int main(int argc, char**argv) {
       }
     }
   }
+  if(mapfile != NULL)
+    fclose(mapfile);
 
   double sum = 0;
+  myreal MB = 1024 * 1024;
+  int currRankBase = 0;
 
   /* Read the communication graph which is in edge-list format */
   if(!myRank)
     printf("Reading messages\n");
-  myreal MB = 1024 * 1024;
+
   struct timeval startRead, endRead;
   gettimeofday(&startRead, NULL);
-  unsigned long long begin = (myRank*numMsgs)/numRanks;
-  unsigned long long end = ((myRank+1)*numMsgs)/numRanks;
-  unsigned long long currentCount = begin;
-  fseek(commfile, begin*16, SEEK_SET);
-  MsgSDB newMsgSDB;
+    
+  while(!feof(conffile)) {
+    char cur_comm_file[256];
+    int cur_ranks;
 
-  while(!feof(commfile)) {
-    Msg newmsg;
-    fread(&newMsgSDB, sizeof(MsgSDB), 1, commfile);
-    newmsg.src = newMsgSDB.src;
-    newmsg.dst = newMsgSDB.dst;
-    newmsg.bytes = newMsgSDB.bytes;
-    if(currentCount >= end) break;
-    Coords& src = coords[newmsg.src];
-    Coords& dst = coords[newmsg.dst];
-    if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]
-      && src.coords[TIER3] == dst.coords[TIER3]) {
+    fscanf(conffile, "%s", cur_comm_file);
+    FILE *commfile = fopen(cur_comm_file, "rb");
+    nulltest((void*)commfile, "communication file");
+    
+    fscanf(conffile, "%d", &cur_ranks);
+    positivetest((double)cur_ranks, "number of ranks");
+    fscanf(conffile, "%llu", &numMsgs);
+    positivetest((double)numMsgs, "number of messages");
+
+    unsigned long long begin = (myRank*numMsgs)/numRanks;
+    unsigned long long end = ((myRank+1)*numMsgs)/numRanks;
+    unsigned long long currentCount = begin;
+    fseek(commfile, begin*16, SEEK_SET);
+    MsgSDB newMsgSDB;
+  
+    if(!myRank)
+      printf("Reading file %s\n", cur_comm_file);
+
+    while(!feof(commfile)) {
+      Msg newmsg;
+      fread(&newMsgSDB, sizeof(MsgSDB), 1, commfile);
+      newmsg.src = newMsgSDB.src + currRankBase;
+      newmsg.dst = newMsgSDB.dst + currRankBase;
+      newmsg.bytes = newMsgSDB.bytes;
+      if(currentCount >= end) break;
+      Coords& src = coords[newmsg.src];
+      Coords& dst = coords[newmsg.dst];
+      if(src.coords[TIER1] == dst.coords[TIER1] 
+          && src.coords[TIER2] == dst.coords[TIER2]
+          && src.coords[TIER3] == dst.coords[TIER3]) {
+        currentCount++;
+        continue;
+      }
+      newmsg.bytes /= MB;
+      newmsg.srcPCI = coords[newmsg.src].coords[NUM_LEVELS];
+      newmsg.dstPCI = coords[newmsg.dst].coords[NUM_LEVELS];
+      coordstoAriesRank(newmsg.src, coords[newmsg.src]);
+      coordstoAriesRank(newmsg.dst, coords[newmsg.dst]);
+      newmsg.bw = 0;
+      msgsV.push_back(newmsg);
+      sum += newmsg.bytes;
       currentCount++;
-      continue;
     }
-    newmsg.bytes /= MB;
-    newmsg.srcPCI = coords[newmsg.src].coords[NUM_LEVELS];
-    newmsg.dstPCI = coords[newmsg.dst].coords[NUM_LEVELS];
-    coordstoAriesRank(newmsg.src, coords[newmsg.src]);
-    coordstoAriesRank(newmsg.dst, coords[newmsg.dst]);
-    newmsg.bw = 0;
-    msgsV.push_back(newmsg);
-    sum += newmsg.bytes;
-    currentCount++;
+    currRankBase = cur_ranks;
+    fclose(commfile);
   }
+  fclose(conffile);
+
   numMsgs = msgsV.size();
 
   //reuse coords for default
@@ -295,8 +320,11 @@ int main(int argc, char**argv) {
 
   if(!myRank) {
     printf("Modeling for following system will be performed:\n");
-    printf("numlevels: %d, dims: %d %d %d %d %d\n", NUM_LEVELS, maxCoords.coords[0], maxCoords.coords[1], maxCoords.coords[2], maxCoords.coords[3], maxCoords.coords[4]);
-    printf("numAries: %d, numPEs: %d, numMsgs: %d, total volume: %.0lf MB\n", numAries, numPEs, numMsgs, sum);
+    printf("numlevels: %d, dims: %d %d %d %d %d\n", NUM_LEVELS, 
+           maxCoords.coords[0], maxCoords.coords[1], maxCoords.coords[2], 
+           maxCoords.coords[3], maxCoords.coords[4]);
+    printf("numAries: %d, numPEs: %d, numMsgs: %llu, total volume: %.0lf MB\n", 
+          numAries, numPEs, numMsgs, sum);
 
     printf("Starting modeling \n");
   }
@@ -309,10 +337,6 @@ int main(int argc, char**argv) {
     calculateAndPrint(startModel, endModel, "time to model");
   }
 
-  fclose(conffile);
-  if(mapfile != NULL)
-    fclose(mapfile);
-  fclose(commfile);
   MPI_Barrier(MPI_COMM_WORLD);
   MPI_Finalize();
   delete[] aries;
@@ -335,14 +359,16 @@ inline void printStats() {
 
   fclose(outputFile);
 
-  long long totalLinks = numAries*(15+5+((numAries/ariesPerGroup) + (numAries % ariesPerGroup) ? 1 : 0));
+  long long totalLinks = numAries*(15+5+((numAries/ariesPerGroup) + 
+                         (numAries % ariesPerGroup) ? 1 : 0));
 
   printf("******************Summary*****************\n");
   printf("maxLoad %.2f MB -- minLoad %.2f MB\n",maxLoad,minLoad);
   printf("averageLinkLoad %.2lf MB \n", totalLinkLoad/totalLinks);
 }
 
-void addToPath(vector< Path > & paths, Coords src, int srcNum, Coords &dst, int loc1, int loc2) {
+void addToPath(vector< Path > & paths, Coords src, int srcNum, Coords &dst, 
+    int loc1, int loc2) {
   int interAries;
   Hop h;
   //first travel TIER3, then TIER2
@@ -368,17 +394,22 @@ void addToPath(vector< Path > & paths, Coords src, int srcNum, Coords &dst, int 
   paths[loc2].push_back(h);
 }
 
-void addFullPaths(vector< Path > & paths, Coords src, int srcNum, Coords &dst, int dstNum) {
+void addFullPaths(vector< Path > & paths, Coords src, int srcNum, Coords &dst, 
+    int dstNum) {
   int pathCount;
   int localConnection = dst.coords[TIER1] % ariesPerGroup;
   //find total number of paths
-  if(localConnection/maxCoords.coords[TIER3] == src.coords[TIER2] || localConnection % maxCoords.coords[TIER3] == src.coords[TIER3]) { //in same TIER2 or aligned on TIER3
+  if(localConnection/maxCoords.coords[TIER3] == src.coords[TIER2] || 
+     localConnection % maxCoords.coords[TIER3] == src.coords[TIER3]) { 
+    //in same TIER2 or aligned on TIER3
     pathCount = 1;
   } else {
     pathCount = 2;
   }
   int remoteConnection = src.coords[TIER1] % ariesPerGroup;
-  if(pathCount == 1 && !(remoteConnection/maxCoords.coords[TIER3] == dst.coords[TIER2] || remoteConnection % maxCoords.coords[TIER3] == dst.coords[TIER3])) {
+  if(pathCount == 1 && !(remoteConnection/maxCoords.coords[TIER3] == 
+    dst.coords[TIER2] || remoteConnection % maxCoords.coords[TIER3] == 
+    dst.coords[TIER3])) {
     pathCount = 2;
   }
 
@@ -447,7 +478,8 @@ void addFullPaths(vector< Path > & paths, Coords src, int srcNum, Coords &dst, i
   }
 }
 
-inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum, Path & p, unsigned *seed) {
+inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum, 
+    Path & p, unsigned *seed) {
   //same group
   if(src.coords[TIER1] == dst.coords[TIER1]) {
     int valiantNum = myrand() % ariesPerGroup;
@@ -494,7 +526,8 @@ inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum, Path 
   }
 }
 
-inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum, Path &p, unsigned *seed) {
+inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum, 
+    Path &p, unsigned *seed) {
   Hop h;
   if(src.coords[TIER2] == dst.coords[TIER2]) { //if use 1 GREEN
     h.aries = srcNum;
@@ -527,7 +560,8 @@ inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum, Path
   }
 }
 
-inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum, Path &p, unsigned * seed) {
+inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum, 
+    Path &p, unsigned * seed) {
     Coords interNode;
     int interNum;
 
@@ -574,7 +608,8 @@ void model() {
     memset(aries, 0, numAries*sizeof(Aries));
     //initialize upper bounds
     for(int i = 0; i < numAries; i++) {
-      aries[i].localRank = coords[i].coords[TIER2] * maxCoords.coords[TIER3] + coords[i].coords[TIER3];
+      aries[i].localRank = coords[i].coords[TIER2] * maxCoords.coords[TIER3] + 
+                           coords[i].coords[TIER3];
       for(int j = 0; j < BLUE_END; j++) {
         if(j < GREEN_END) aries[i].linksB[j] = GREEN_BW/(myreal)NUM_ITERS;
         else if(j < BLACK_END) aries[i].linksB[j] = BLACK_BW/(myreal)NUM_ITERS;
@@ -621,8 +656,10 @@ void model() {
         }
       }
 
-      MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-      MPI_Allreduce(MPI_IN_PLACE, pciLoads, numAries*8, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+      MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, 
+                    MPI_SUM, MPI_COMM_WORLD);
+      MPI_Allreduce(MPI_IN_PLACE, pciLoads, numAries*8, MPI_DOUBLE, MPI_SUM, 
+                    MPI_COMM_WORLD);
 
       linkCount = 0;
       pciCount = 0;
@@ -683,7 +720,8 @@ void model() {
     }
   }
 
-  MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, 
+                MPI_COMM_WORLD);
 
   linkCount = 0;
   for(int i = 0; i < numAries; i++) {
@@ -713,7 +751,8 @@ inline void addPathsToMsgs() {
     }
 #else 
     // add upto 2 direct paths
-    if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]) {
+    if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == 
+       dst.coords[TIER2]) {
       currmsg.paths.resize(1);
       currmsg.paths[0].resize(1);
       currmsg.paths[0][0].aries = currmsg.src;
@@ -754,8 +793,10 @@ inline void updateMessageAndLinks() {
     }
   }
 
-  MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-  MPI_Allreduce(MPI_IN_PLACE, pciLoads, numAries*8, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, 
+                MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, pciLoads, numAries*8, MPI_DOUBLE, MPI_SUM, 
+                MPI_COMM_WORLD);
 
   linkCount = 0;
   pciCount = 0;
@@ -777,7 +818,8 @@ inline void updateMessageAndLinks() {
         for(int j = 0; j < currmsg.paths[i].size(); j++) {
           min = MIN(min, (currmsg.loads[i]/aries[currmsg.paths[i][j].aries].linksO[currmsg.paths[i][j].link])*aries[currmsg.paths[i][j].aries].linksB[currmsg.paths[i][j].link]);
         }
-        min = MIN(min, (currmsg.loads[i]/aries[currmsg.src].pciSO[currmsg.srcPCI])*aries[currmsg.src].pciSB[currmsg.srcPCI]);
+        min = MIN(min, (currmsg.loads[i]/aries[currmsg.src].pciSO[currmsg.srcPCI])
+                       *aries[currmsg.src].pciSB[currmsg.srcPCI]);
         min = MIN(min, (currmsg.loads[i]/aries[currmsg.dst].pciRO[currmsg.dstPCI])*aries[currmsg.dst].pciRB[currmsg.dstPCI]);
 
         for(size_t j = 0; j < currmsg.paths[i].size(); j++) {
@@ -818,7 +860,8 @@ inline void markExpansionRequests() {
 void selectExpansionRequests(bool & expand) {
   for(size_t m = 0; m < msgsV.size(); m++) {
     Msg &currmsg = msgsV[m];
-    if(aries[currmsg.src].pciSB[currmsg.srcPCI] < CUTOFF_BW || aries[currmsg.dst].pciRB[currmsg.dstPCI] < CUTOFF_BW) {
+    if(aries[currmsg.src].pciSB[currmsg.srcPCI] < CUTOFF_BW || 
+       aries[currmsg.dst].pciRB[currmsg.dstPCI] < CUTOFF_BW) {
       for(int i = 0; i < currmsg.paths.size(); i++) {
         currmsg.expand[i] = false;
       }
@@ -830,7 +873,8 @@ void selectExpansionRequests(bool & expand) {
     for(size_t i = 0; i < currmsg.paths.size(); i++) {
       currmsg.loads[i] = FLT_MAX;
       for(int j = 0; j < currmsg.paths[i].size(); j++) {
-        currmsg.loads[i] = MIN(currmsg.loads[i], aries[currmsg.paths[i][j].aries].linksB[currmsg.paths[i][j].link]);
+        currmsg.loads[i] = MIN(currmsg.loads[i], 
+        aries[currmsg.paths[i][j].aries].linksB[currmsg.paths[i][j].link]);
       }
       sum += currmsg.loads[i];
     }

@@ -1,3 +1,5 @@
-92160
-960 6 16 4 24
-70778880
+#total number of routers
+#groups #rows #columns #nodes #cores
+filename #ranks #lines
+filename #ranks #lines
+... as many files as needed
