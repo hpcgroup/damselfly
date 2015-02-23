@@ -22,9 +22,9 @@ using namespace std;
 #define GREEN_START 0
 #define GREEN_END 16
 #define BLACK_START GREEN_END
-#define BLACK_END 22
+#define BLACK_END 32
 #define BLUE_START BLACK_END
-#define BLUE_END 32
+#define BLUE_END 42
 
 #define GREEN 0
 #define BLACK 1
@@ -78,12 +78,12 @@ typedef struct Coords {
 } Coords;
 
 typedef struct Aries {
-  myreal linksO[32]; // 0-15 Green, 16-21 Black
-  myreal linksB[32], linksB_t[32]; //remaining link bandwidth
+  myreal linksO[BLUE_END]; // 0-15 Green, 16-21 Black
+  myreal linksB[BLUE_END], linksB_t[BLUE_END]; //remaining link bandwidth
   myreal pciSO[4], pciRO[4]; //send and recv PCI
   myreal pciSB[4], pciRB[4], pciSB_t[4], pciRB_t[4]; //remaining PCI bandwidth
   int localRank; //rank within the group
-  myreal linksSum[32]; //needed to continously get traffic
+  myreal linksSum[BLUE_END]; //needed to continously get traffic
 } Aries;
 
 typedef struct Hop {
