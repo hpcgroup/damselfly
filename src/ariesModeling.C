@@ -26,6 +26,10 @@ using namespace std;
 #define BLUE_START BLACK_END
 #define BLUE_END 32
 
+#define GREEN 0
+#define BLACK 1
+#define BLUE 2
+
 #define GREEN_BW 5120
 #define BLACK_BW 5120
 #define BLUE_BW 5120
@@ -44,6 +48,17 @@ using namespace std;
 
 typedef double myreal;
 unsigned rand_seed;
+
+struct Link {
+  int offset, type;
+};
+struct bLink {
+  int offset, dest;
+};
+
+vector< map< int, vector<Link> > > intraGroupLinks;
+vector< map< int, vector<bLink> > > interGroupLinks;
+vector< vector< vector<int> > > connectionList;
 
 inline void mysrand(unsigned seed) {
   srand(seed);
@@ -96,6 +111,14 @@ typedef struct MsgSDB {
   double bytes;
 } MsgSDB;
 
+struct IntraGroupLink {
+  int src, dest, type;
+};
+
+struct InterGroupLink {
+  int src, dest;
+};
+
 unsigned long long numMsgs; // number of messages to be sent
 vector<Msg> msgsV; // messages left to be routed
 int numAries; // number of Aries in the system
@@ -106,15 +129,15 @@ Aries *aries; // link status of current nodes
 int ariesPerGroup;
 FILE *outputFile;
 int myRank, numRanks;
+double *linkLoads, *pciLoads;
+int round;
 
 //forward declaration
 void model();
 inline void addLoads();
 inline void addPathsToMsgs();
-inline void addToPath(vector< Path > & paths, Coords src, int srcNum, 
-    Coords &dst, int loc1, int loc2);
-inline void addFullPaths(vector< Path > & paths, Coords src, int srcNum, 
-    Coords &dst, int dstNum);
+inline void getDirectPath(Coords src, int srcNum, Coords &dst, int dstNum, 
+    Path & p, unsigned *seed = 0);
 inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum, 
     Path & p, unsigned *seed = 0);
 inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum, 
@@ -238,6 +261,119 @@ int main(int argc, char**argv) {
   if(mapfile != NULL)
     fclose(mapfile);
 
+  // read intra group connections, store from a router's perspective
+  // all links to the same router form a vector
+  char intraFile[256] = {0};
+  fscanf(conffile, "%s", intraFile);
+  FILE *groupFile = fopen(intraFile, "rb");
+  if(!myRank)
+    printf("Reading intraGroup file %s\n", intraFile);
+  
+  {
+    vector< int > greenOffsets, blackOffsets;
+    greenOffsets.resize(ariesPerGroup, 0);
+    blackOffsets.resize(ariesPerGroup, 0);
+    intraGroupLinks.resize(ariesPerGroup);
+    IntraGroupLink newLink;
+
+    while(fread(&newLink, sizeof(IntraGroupLink), 1, groupFile) != 0) {
+      Link tmpLink;
+      tmpLink.type = newLink.type;
+      if(tmpLink.type == GREEN) {
+        tmpLink.offset = greenOffsets[newLink.src]++;
+      } else {
+        tmpLink.offset = BLACK_START + blackOffsets[newLink.src]++;
+      }
+      intraGroupLinks[newLink.src][newLink.dest].push_back(tmpLink);
+    }
+  }
+
+  fclose(groupFile);
+
+  // read inter group connections, store from a router's perspective
+  // also create a group level table that tells all the connecting routers
+  char interFile[256] = {0};
+  fscanf(conffile, "%s", interFile);
+  FILE *systemFile = fopen(interFile, "rb");
+  if(!myRank)
+    printf("Reading interGroup file %s\n", interFile);
+  
+  {
+    vector< int > blueOffsets;
+    blueOffsets.resize(numAries, 0);
+    interGroupLinks.resize(numAries);
+    connectionList.resize(maxCoords.coords[0]);
+    for(int g = 0; g < connectionList.size(); g++) {
+      connectionList[g].resize(maxCoords.coords[0]);
+    }
+    InterGroupLink newLink;
+
+    while(fread(&newLink, sizeof(InterGroupLink), 1, systemFile) != 0) {
+      bLink tmpLink;
+      tmpLink.dest = newLink.dest;
+      int srcG = newLink.src / ariesPerGroup;
+      int destG = newLink.dest / ariesPerGroup;
+      tmpLink.offset = BLUE_START + blueOffsets[newLink.src]++;
+      interGroupLinks[newLink.src][destG].push_back(tmpLink);
+      int r;
+      for(r = 0; r < connectionList[srcG][destG].size(); r++) {
+        if(connectionList[srcG][destG][r] == newLink.src) break;
+      }
+      if(r == connectionList[srcG][destG].size()) {
+        connectionList[srcG][destG].push_back(newLink.src);
+      }
+    }
+  }
+
+  fclose(systemFile);
+
+#if DUMP_CONNECTIONS
+  printf("Dumping intra-group connections\n");
+  for(int a = 0; a < intraGroupLinks.size(); a++) {
+    printf("Connections for router %d\n", a);
+    map< int, vector<Link> >  &curMap = intraGroupLinks[a];
+    map< int, vector<Link> >::iterator it = curMap.begin();
+    for(; it != curMap.end(); it++) {
+      printf(" ( %d - ", it->first);
+      for(int l = 0; l < it->second.size(); l++) {
+        printf("%d,%d ", it->second[l].offset, it->second[l].type);
+      }
+      printf(")");
+    }
+    printf("\n");
+  }
+#endif
+#if DUMP_CONNECTIONS
+  printf("Dumping inter-group connections\n");
+  for(int a = 0; a < interGroupLinks.size(); a++) {
+    printf("Connections for router %d\n", a);
+    map< int, vector<Link> >  &curMap = interGroupLinks[a];
+    map< int, vector<Link> >::iterator it = curMap.begin();
+    for(; it != curMap.end(); it++) {
+      printf(" ( %d - ", it->first);
+      for(int l = 0; l < it->second.size(); l++) {
+        printf("%d,%d ", it->second[l].offset, it->second[l].dest);
+      }
+      printf(")");
+    }
+    printf("\n");
+  }
+#endif
+
+#if DUMP_CONNECTIONS
+  printf("Dumping source aries for global connections\n");
+  for(int g = 0; g < maxCoords.coords[0]; g++) {
+    for(int g1 = 0; g1 < maxCoords.coords[0]; g1++) {
+      printf(" ( ");
+      for(int l = 0; l < connectionList[g][g1].size(); l++) {
+        printf("%d ", connectionList[g][g1][l]); 
+      }
+      printf(")");
+    }
+    printf("\n");
+  }
+#endif
+  
   double sum = 0;
   myreal MB = 1024 * 1024;
   int currRankBase = 0;
@@ -370,114 +506,13 @@ inline void printStats() {
   printf("averageLinkLoad %.2lf MB \n", totalLinkLoad/totalLinks);
 }
 
-void addToPath(vector< Path > & paths, Coords src, int srcNum, Coords &dst, 
-    int loc1, int loc2) {
-  int interAries;
-  Hop h;
-  //first travel TIER3, then TIER2
-  h.aries = srcNum;
-  h.link = dst.coords[TIER3]; //GREEN
-  paths[loc1].push_back(h);
-  int back3 = src.coords[TIER3];
-  src.coords[TIER3] = dst.coords[TIER3];
-  coordstoAriesRank(interAries, src);
-  h.aries = interAries;
-  h.link = BLACK_START + dst.coords[TIER2];
-  paths[loc1].push_back(h);
-
-  //first travel TIER2, then TIER3
-  h.aries = srcNum;
-  h.link = BLACK_START + dst.coords[TIER2];
-  paths[loc2].push_back(h);
-  src.coords[TIER3] = back3;
-  src.coords[TIER2] = dst.coords[TIER2];
-  coordstoAriesRank(interAries, src);
-  h.aries = interAries;
-  h.link = dst.coords[TIER3];
-  paths[loc2].push_back(h);
-}
-
-void addFullPaths(vector< Path > & paths, Coords src, int srcNum, Coords &dst, 
-    int dstNum) {
-  int pathCount;
-  int localConnection = dst.coords[TIER1] % ariesPerGroup;
-  //find total number of paths
-  if(localConnection/maxCoords.coords[TIER3] == src.coords[TIER2] || 
-     localConnection % maxCoords.coords[TIER3] == src.coords[TIER3]) { 
-    //in same TIER2 or aligned on TIER3
-    pathCount = 1;
-  } else {
-    pathCount = 2;
-  }
-  int remoteConnection = src.coords[TIER1] % ariesPerGroup;
-  if(pathCount == 1 && !(remoteConnection/maxCoords.coords[TIER3] == 
-    dst.coords[TIER2] || remoteConnection % maxCoords.coords[TIER3] == 
-    dst.coords[TIER3])) {
-    pathCount = 2;
-  }
-
-  paths.resize(pathCount);
-  Coords interNode;
-  int interNum;
-  //add hops within the src group
-  if(localConnection == aries[srcNum].localRank) { //src connects to destination group
-    interNode = src;
-    interNum = srcNum;
-  } else {
-    interNode.coords[TIER1] = src.coords[TIER1];
-    interNode.coords[TIER2] = localConnection/maxCoords.coords[TIER3];
-    interNode.coords[TIER3] = localConnection % maxCoords.coords[TIER3];
-    coordstoAriesRank(interNum, interNode);
-    if(interNode.coords[TIER2] == src.coords[TIER2]) { //if use only 1 GREEN link
-      Hop h;
-      h.aries = srcNum;
-      h.link = interNode.coords[TIER3];
-      for(int i = 0; i < pathCount; i++) {
-        paths[i].push_back(h);
-      }
-    } else if(interNode.coords[TIER3] == src.coords[TIER3]) { //if use only 1 BLACK link
-      Hop h;
-      h.aries = srcNum;
-      h.link = BLACK_START + interNode.coords[TIER2];
-      for(int i = 0; i < pathCount; i++) {
-        paths[i].push_back(h);
-      }
-    } else {
-      addToPath(paths, src, srcNum, interNode, 0, 1);
-    }
-  }
-
-  //add a BLUE connection to all paths
-  Hop h;
-  h.aries = interNum;
-  h.link = BLUE_START + dst.coords[TIER1]/ariesPerGroup;
-  for(int i = 0; i < pathCount; i++) {
-    paths[i].push_back(h);
-  }
-
-  //add hops within the dst group
-  if(remoteConnection != aries[dstNum].localRank) {
-    interNode.coords[TIER1] = dst.coords[TIER1];
-    interNode.coords[TIER2] = remoteConnection/maxCoords.coords[TIER3];
-    interNode.coords[TIER3] = remoteConnection % maxCoords.coords[TIER3];
-    coordstoAriesRank(interNum, interNode);
-    if(interNode.coords[TIER2] == dst.coords[TIER2]) { //if use only 1 GREEN LINK
-      Hop h;
-      h.aries = interNum;
-      h.link = dst.coords[TIER3];
-      for(int i = 0; i < pathCount; i++) {
-        paths[i].push_back(h);
-      }
-    } else if(interNode.coords[TIER3] == dst.coords[TIER3]) { //if use only 1 BLACK link
-      Hop h;
-      h.aries = interNum;
-      h.link = BLACK_START + dst.coords[TIER2];
-      for(int i = 0; i < pathCount; i++) {
-        paths[i].push_back(h);
-      }
-    } else {
-      addToPath(paths, interNode, interNum, dst, 0, 1);
-    }
+inline void getDirectPath(Coords src, int srcNum, Coords &dst, int dstNum, 
+    Path & p, unsigned *seed) {
+  //same group
+  if(src.coords[TIER1] == dst.coords[TIER1]) {
+    addIntraPath(src, srcNum, dst, dstNum, p, seed);
+  } else { //different groups
+    addInterPath(src, srcNum, dst, dstNum, p, seed);
   }
 }
 
@@ -532,32 +567,64 @@ inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum,
 inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum, 
     Path &p, unsigned *seed) {
   Hop h;
-  if(src.coords[TIER2] == dst.coords[TIER2]) { //if use 1 GREEN
+  int usedInter = 0;
+  if(src.coords[TIER2] == dst.coords[TIER2] || 
+     src.coords[TIER3] == dst.coords[TIER3]) { //if use just 1 link
     h.aries = srcNum;
-    h.link = dst.coords[TIER3];
-    p.push_back(h);
-  } else if (src.coords[TIER3] == dst.coords[TIER3]) { //if use 1 BLACK
-    h.aries = srcNum;
-    h.link = BLACK_START + dst.coords[TIER2];
+    vector< Link > & intraLinks =
+      intraGroupLinks[aries[srcNum].localRank][aries[dstNum].localRank];
+    if(intraLinks.size() > 1) {
+      usedInter = myrand() % intraLinks.size();   
+    } 
+    h.link = intraLinks[usedInter].offset;
     p.push_back(h);
   } else { //two paths, choose 1
-    if(myrand() % 2) { //first GREEN, then BLACK
+    Coords gNeighbor, bNeighbor;
+    int gRank, bRank;
+    gNeighbor = bNeighbor = src;
+    gNeighbor.coords[TIER3] = dst.coords[TIER3];
+    bNeighbor.coords[TIER2] = dst.coords[TIER2];
+    coordstoAriesRank(gRank, gNeighbor);
+    coordstoAriesRank(bRank, bNeighbor);
+    vector< Link > & gLinks =
+      intraGroupLinks[aries[srcNum].localRank][aries[gRank].localRank];
+    vector< Link > & bLinks =
+      intraGroupLinks[aries[srcNum].localRank][aries[bRank].localRank];
+    int totalPaths = gLinks.size() + bLinks.size();
+
+    if((myrand() % totalPaths) < gLinks.size()) { //first GREEN, then BLACK
       h.aries = srcNum;
-      h.link = dst.coords[TIER3];
+      if(gLinks.size() > 1) {
+        usedInter = myrand() % gLinks.size();   
+      } 
+      h.link = gLinks[usedInter].offset;
       p.push_back(h);
-      src.coords[TIER3] = dst.coords[TIER3];
-      coordstoAriesRank(srcNum, src);
-      h.aries = srcNum;
-      h.link = BLACK_START + dst.coords[TIER2];
+      h.aries = gRank;
+      vector< Link > & gbLinks =
+        intraGroupLinks[aries[gRank].localRank][aries[dstNum].localRank];
+      if(gbLinks.size() > 1) {
+        usedInter = myrand() % gbLinks.size();   
+      } else {
+        usedInter = 0;
+      }
+      h.link = gbLinks[usedInter].offset;
       p.push_back(h);
     } else { //first BLACK, then GREEN
       h.aries = srcNum;
-      h.link = BLACK_START + dst.coords[TIER2];
+      if(bLinks.size() > 1) {
+        usedInter = myrand() % bLinks.size();   
+      } 
+      h.link = bLinks[usedInter].offset;
       p.push_back(h);
-      src.coords[TIER2] = dst.coords[TIER2];
-      coordstoAriesRank(srcNum, src);
-      h.aries = srcNum;
-      h.link = dst.coords[TIER3];
+      h.aries = bRank;
+      vector< Link > & bgLinks =
+        intraGroupLinks[aries[bRank].localRank][aries[dstNum].localRank];
+      if(bgLinks.size() > 1) {
+        usedInter = myrand() % bgLinks.size();   
+      } else {
+        usedInter = 0;
+      }
+      h.link = bgLinks[usedInter].offset;
       p.push_back(h);
     }
   }
@@ -566,38 +633,47 @@ inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum,
 inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum, 
     Path &p, unsigned * seed) {
     Coords interNode;
-    int interNum;
+    int usedInter = 0, interNum;
+    int dstG = dst.coords[TIER1];
 
-    int localConnection = dst.coords[TIER1] % ariesPerGroup;
-    if(localConnection == aries[srcNum].localRank) {
+    vector< int > & intNodes =
+      connectionList[src.coords[TIER1]][dstG];
+    if(intNodes.size() > 1) {
+      usedInter = myrand() % intNodes.size();   
+    }
+    usedInter = intNodes[usedInter];
+    if(usedInter == srcNum) {
       interNode = src;
       interNum = srcNum;
     } else {
-      interNode.coords[TIER1] = src.coords[TIER1];
-      interNode.coords[TIER2] = localConnection / maxCoords.coords[TIER3];
-      interNode.coords[TIER3] = localConnection % maxCoords.coords[TIER3];
+      assert(src.coords[TIER1] == coords[usedInter].coords[TIER1]);
+      interNode.coords[TIER1] = coords[usedInter].coords[TIER1];
+      interNode.coords[TIER2] = coords[usedInter].coords[TIER2];
+      interNode.coords[TIER3] = coords[usedInter].coords[TIER3];
       coordstoAriesRank(interNum, interNode);
+      assert(interNum == usedInter);
       addIntraPath(src, srcNum, interNode, interNum, p, seed);
     }
 
     //BLUE link
     Hop h;
     h.aries = interNum;
-    h.link = BLUE_START + dst.coords[TIER1]/ariesPerGroup;
+    vector< bLink > & interConnections = interGroupLinks[interNum][dstG]; 
+    usedInter = myrand() % interConnections.size();   
+    h.link = interConnections[usedInter].offset;
+    usedInter = interConnections[usedInter].dest;
     p.push_back(h);
 
-    localConnection = src.coords[TIER1] % ariesPerGroup;
-    if(localConnection != aries[dstNum].localRank) {
-      interNode.coords[TIER1] = dst.coords[TIER1];
-      interNode.coords[TIER2] = localConnection / maxCoords.coords[TIER3];
-      interNode.coords[TIER3] = localConnection % maxCoords.coords[TIER3];
+    if(usedInter != dstNum) {
+      assert(coords[usedInter].coords[TIER1] == dst.coords[TIER1]);
+      interNode.coords[TIER1] = coords[usedInter].coords[TIER1];
+      interNode.coords[TIER2] = coords[usedInter].coords[TIER2];
+      interNode.coords[TIER3] = coords[usedInter].coords[TIER3]; 
       coordstoAriesRank(interNum, interNode);
+      assert(usedInter == interNum);
       addIntraPath(interNode, interNum, dst, dstNum, p, seed);
     }
 }
-
-double *linkLoads, *pciLoads;
-int round;
 
 void model() {
 
@@ -743,43 +819,38 @@ void model() {
 }
 
 inline void addPathsToMsgs() {
+  int indirect = 2;
   for(size_t m = 0; m < msgsV.size(); m++) {
     Msg &currmsg = msgsV[m];
     Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
     currmsg.paths.clear();
-#if ! BIASED_ROUTING
     currmsg.paths.resize(PATHS_PER_ITER);
-    for(int i = 0; i < PATHS_PER_ITER; i++) {
-      getRandomPath(src, currmsg.src, dst, currmsg.dst, currmsg.paths[i]);
-    }
-#else 
-    // add upto 2 direct paths
-    if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == 
-       dst.coords[TIER2]) {
-      currmsg.paths.resize(1);
-      currmsg.paths[0].resize(1);
-      currmsg.paths[0][0].aries = currmsg.src;
-      currmsg.paths[0][0].link = dst.coords[TIER3]; //GREEN
-    } else if(src.coords[TIER1] == dst.coords[TIER1]) {  //in the same second tier
-      if(src.coords[TIER3] == dst.coords[TIER3]) { //aligned on tier3 - direct connection
-        currmsg.paths.resize(1);
-        currmsg.paths[0].resize(1);
-        currmsg.paths[0][0].aries = currmsg.src;
-        currmsg.paths[0][0].link = BLACK_START + dst.coords[TIER2];
-      } else { // else two paths of length 2
-        currmsg.paths.resize(2);
-        addToPath(currmsg.paths, src, currmsg.src, dst, 0, 1);
-      }
-    } else {
-      addFullPaths(currmsg.paths, src, currmsg.src, dst, currmsg.dst);
+    // add 2 direct paths
+    for(int i = 0; i < 2; i++) {
+      getDirectPath(src, currmsg.src, dst, currmsg.dst, currmsg.paths[i]);
     };
-    //add rest from indirect paths
-    currmsg.dcount = currmsg.paths.size();
-    currmsg.paths.resize(PATHS_PER_ITER);
-    for(int i = currmsg.dcount; i < PATHS_PER_ITER; i++) {
-      getRandomPath(src, currmsg.src, dst, currmsg.dst, currmsg.paths[i]);
+#if NO_PATH_REPITITION
+    int compare = 1;
+    if(currmsg.paths[0].size() != currmsg.paths[1].size()) compare = 0;
+    if(compare) {
+      for(int i = 0; i < currmsg.paths[0].size(); i++) {
+        if((currmsg.paths[0][i].aries != currmsg.paths[1][i].aries) || 
+           (currmsg.paths[0][i].link != currmsg.paths[1][i].link)) {
+          compare = 0;
+          break;
+        }
+      }
+      if(compare) {
+        currmsg.paths.resize(1);
+        currmsg.paths.resize(PATHS_PER_ITER);
+        indirect = 1;
+      }
     }
 #endif
+    //add rest from indirect paths
+    for(int i = indirect; i < PATHS_PER_ITER; i++) {
+      getRandomPath(src, currmsg.src, dst, currmsg.dst, currmsg.paths[i]);
+    }
   }
 }
 

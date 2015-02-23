@@ -1,3 +1,5 @@
 256
 16 4 4 4 16
+intra_con 
+inter_con
 commdata.bin 16384 229376
