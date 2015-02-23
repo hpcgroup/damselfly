@@ -2,6 +2,6 @@
 #groups #rows #columns #nodes #cores
 filename for intra group connection
 filename for inter group connection
-filename #ranks #lines
-filename #ranks #lines
+filename #ranks #edges
+filename #ranks #edges
 ... as many files as needed

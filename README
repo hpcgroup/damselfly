@@ -10,3 +10,10 @@ Branch biased-only is currently active and should be closest to real machine's
 behavior. 
 
 The confformat file specifies the format for the configurtion file.
+
+Run Command:
+
+mpirun -np 8 ./ariesModeling conffile map_file out_file
+
+map_file - if non-existent, default is used
+out_file - generated, contains the bytes on links
