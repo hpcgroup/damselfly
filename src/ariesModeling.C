@@ -5,6 +5,7 @@
 #include <cassert>
 #include <list>
 #include <vector>
+#include <map>
 #include <sys/time.h>
 #include <cfloat>
 #include <mpi.h>
