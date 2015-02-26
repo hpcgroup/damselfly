@@ -100,10 +100,10 @@ nodes = np.zeros(system_size)
 empty = list(xrange(0,system_size))
 
 # For all tasks
-for t in tasks:
-    print "Started task ", i, task_sizes[t]
+for t,size,dist in zip(tasks,task_sizes,task_distributions):
+    #print "Started task ", i, size
     count = 0
-    while count < task_sizes[t]:
+    while count < size:
         
         # Choose a random node
         elem = random.choice(empty)
@@ -112,11 +112,11 @@ for t in tasks:
         test = np.random.uniform()
         
         # Get the current pmf value for the distribution
-        current = task_distributions[t].adjustedPMF(elem)
+        current = dist.adjustedPMF(elem)
 
         # If we pass the test
         if test < current:
-            print "Picked ", elem
+            #print "Picked ", elem
             # Assign the node to this task
             nodes[elem] = t+1
             count += 1
@@ -138,12 +138,15 @@ import matplotlib.pyplot as plt
 
 fig, ax = plt.subplots()
 for pmf,t in zip(pmfs,tasks):
+    #print "Colors ", colors[t]
     ax.plot(pmf,colors[t])
-    
+
+print ""
 for t in tasks:
+    #print "Colors ", symbol[t]
     x = np.where(nodes == t+1)
-    ax.plot(x,[0.1]*len(x),symbol[t])
-    print x
-#ax.plot(x,y,'ro',c=colors)
+    ax.plot(x,[(t+1)*0.05]*len(x),symbol[t])
+    #print x
+
 plt.show()
 
