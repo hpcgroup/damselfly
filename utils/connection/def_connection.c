@@ -37,14 +37,20 @@ int main(int argc, char **argv) {
           }
         }
         int myOff = router % (r * c);
+        int numLink = g / (r*c);
+        if(g % (r*c) != 0) {
+          if((router % (r*c)) < (g % (r*c))) {
+            numLink++;
+          }
+        }
         int myG = router / (r * c);
-        for(int blues = 0; blues < g / (r*c); blues++) {
+        for(int blues = 0; blues < numLink; blues++) {
           int dest = (blues * r * c) + myOff;
           if(dest != myG) {
             dest = (dest * r * c ) + (myG % (r * c));
             fwrite(&router, sizeof(int), 1, inter);
             fwrite(&dest, sizeof(int), 1, inter);
-           // printf("%d %d\n", router, dest);
+            //printf("%d %d\n", router, dest);
           }
         }
         router++;
