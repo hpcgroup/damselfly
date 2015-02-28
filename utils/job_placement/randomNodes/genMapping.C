@@ -2,20 +2,20 @@
 #include <cstdlib>
 #include <string.h>
 
-int numgroups, numchassis, numrouters, numpcis, numcores;
+int numgroups, numrows, numcols, numnodesperrouter, numcores;
 
 void rankToCoords(int rank, int *dims) {
 	dims[4] = rank % numcores;
 	rank /= numcores;
 
-	dims[3] = rank % numpcis;
-	rank /= numpcis;
+	dims[3] = rank % numnodesperrouter;
+	rank /= numnodesperrouter;
 
-	dims[2] = rank % numrouters;
-	rank /= numrouters;
+	dims[2] = rank % numcols;
+	rank /= numcols;
 
-	dims[1] = rank % numchassis;
-	rank /= numchassis;
+	dims[1] = rank % numrows;
+	rank /= numrows;
 
 	dims[0] = rank % numgroups;
 }
@@ -23,22 +23,22 @@ void rankToCoords(int rank, int *dims) {
 int main(int argc, char**argv) {
 
   numgroups = atoi(argv[1]);
-  numchassis = atoi(argv[2]);
-  numrouters = atoi(argv[3]);
-  numpcis = atoi(argv[4]);
+  numrows = atoi(argv[2]);
+  numcols = atoi(argv[3]);
+  numnodesperrouter = atoi(argv[4]);
   numcores = atoi(argv[5]);
   int jobsize = atoi(argv[6]);
 
-  int numNodes = numgroups*numchassis*numrouters*numpcis;
-  int *placed = new int[numNodes];
+  int numtotalnodes = numgroups*numrows*numcols*numnodesperrouter;
+  int *placed = new int[numtotalnodes];
   int *jobmap = new int[jobsize/numcores];
 
   srand(101429);
 
-  memset(placed, 0, sizeof(int)*numNodes);
+  memset(placed, 0, sizeof(int)*numtotalnodes);
   int currentNode = 0;
   for(int i = 0; i < 8*(jobsize/numcores); i++) {
-  	int target = rand() % numNodes;
+  	int target = rand() % numtotalnodes;
   	if(placed[target] == 0) {
   		placed[target] = 1;
   		jobmap[currentNode] = target;
