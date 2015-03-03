@@ -110,7 +110,7 @@ def rank_to_coords(rank,groups,rows,columns,nodes_per_router,cores_per_node):
 
 
 if len(argv) < 7:
-    print "Usage: %s <numGroups> <numRows> <numColumns> <numNodesPerRouter> <numCoresPerNode>  [Binomial|Geometric] <p> <#nodes task 1> .... <#nodes task N>"
+    print "Usage: %s <numGroups> <numRows> <numColumns> <numNodesPerRouter> <numCoresPerNode>  [Binomial|Geometric] <p> <#cores task 1> .... <#cores task N>"
     exit(0)
     
 
