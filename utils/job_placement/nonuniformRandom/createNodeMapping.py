@@ -17,8 +17,8 @@ from math import *
 import random 
 from __builtin__ import True
 
-symbol = ["ro","g^","bs","yo"]
-colors = ["r","g","b","y"]
+symbol = ["ro","g^","bs","yo","cs"]
+colors = ["r","g","b","y","c"]
 
 def n_choose_k(n,k):
     return factorial(n) / (factorial(k)*factorial(n-k))
@@ -88,6 +88,26 @@ class Geometric(Distribution):
         
         return (1-self.p)**(i)*self.p / total_mass
         
+
+def rank_to_coords(rank,groups,rows,columns,nodes_per_router,cores_per_node):
+
+    dims = [0,0,0,0,rank]
+    dims[4] = rank % cores_per_node;
+    rank /= cores_per_node;
+
+    dims[3] = rank % nodes_per_router;
+    rank /= nodes_per_router;
+
+    dims[2] = rank % columns;
+    rank /= columns;
+
+    dims[1] = rank % rows;
+    rank /= rows;
+
+    dims[0] = rank % groups;
+    
+    return dims
+
 
 if len(argv) < 7:
     print "Usage: %s <numGroups> <numRows> <numColumns> <numNodesPerRouter> <numCoresPerNode>  [Binomial|Geometric] <p> <#nodes task 1> .... <#nodes task N>"
@@ -176,31 +196,37 @@ for t,size,dist in zip(tasks,task_sizes,task_distributions):
                 
 
 
-print "Starting plotting"
-pmfs = []
-scale = 0
-for d in task_distributions:
-    pmfs.append([d.pmf(i) for i in xrange(0,node_count)])
-    scale = max(scale,max(pmfs[-1]))
 
-import matplotlib.pyplot as plt
+if False:
+    pmfs = []
+    scale = 0
+    for d in task_distributions:
+        pmfs.append([d.pmf(i) for i in xrange(0,node_count)])
+        scale = max(scale,max(pmfs[-1]))
+    
+    import matplotlib.pyplot as plt
+    
+    
+    fig, ax = plt.subplots()
+    for pmf,t in zip(pmfs,tasks):
+        #print "Colors ", colors[t]
+        ax.plot(xrange(0,cores_per_node*node_count,cores_per_node),pmf,colors[t])
+    
+    #print ""
+    for t in tasks:
+        #print "Colors ", symbol[t]
+        x = np.where(cores == t+1)
+        ax.plot(x,[(t+1)*scale/len(tasks) ]*len(x),symbol[t])
+        #print x
+    
+    plt.show()
 
-
-fig, ax = plt.subplots()
-for pmf,t in zip(pmfs,tasks):
-    #print "Colors ", colors[t]
-    print len(pmf), node_count
-    ax.plot(xrange(0,cores_per_node*node_count,cores_per_node),pmf,colors[t])
-
-#print ""
-for t in tasks:
-    #print "Colors ", symbol[t]
-    x = np.where(cores == t+1)
-    ax.plot(x,[(t+1)*scale/len(tasks) ]*len(x),symbol[t])
-    #print x
-
-plt.show()
-
-
+for t in xrange(0,len(tasks)):
+     x = np.where(cores == t+1)
+     #print x
+     for rank in x[0]:
+        dims = rank_to_coords(rank, groups, rows, columns, nodes_per_router, cores_per_node)
+        print "%d %d %d %d %d" % (dims[0],dims[1],dims[2],dims[3],dims[4])
+            
 
 
