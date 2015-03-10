@@ -23,7 +23,7 @@ int main(int argc, char **argv) {
               fwrite(&router, sizeof(int), 1, intra);
               fwrite(&dest, sizeof(int), 1, intra);
               fwrite(&green, sizeof(int), 1, intra);
-              //printf("%d %d %d\n", router, dest, green);
+              // printf("INTRA %d %d %d\n", router, dest, green);
             }
           }
           for(int rows1 = 0; rows1 < r; rows1++) {
@@ -32,7 +32,7 @@ int main(int argc, char **argv) {
               fwrite(&router, sizeof(int), 1, intra);
               fwrite(&dest, sizeof(int), 1, intra);
               fwrite(&black, sizeof(int), 1, intra);
-              //printf("%d %d %d\n", router, dest, green);
+              // printf("INTRA %d %d %d\n", router, dest, black);
             }
           }
         }
@@ -50,7 +50,7 @@ int main(int argc, char **argv) {
             dest = (dest * r * c ) + (myG % (r * c));
             fwrite(&router, sizeof(int), 1, inter);
             fwrite(&dest, sizeof(int), 1, inter);
-            //printf("%d %d\n", router, dest);
+            // printf("INTER %d %d\n", router, dest);
           }
         }
         router++;

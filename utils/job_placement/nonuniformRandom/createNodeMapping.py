@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 #
 # Define k random distrobutions centered around random positions
 # Keep track of empty cells
