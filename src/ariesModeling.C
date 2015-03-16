@@ -46,6 +46,7 @@ using namespace std;
 
 #define MAX(a,b) (((a)>(b))?(a):(b))
 #define MIN(a,b) (((a)<(b))?(a):(b))
+#define OLD_STATS_ON 0
 
 typedef double myreal;
 unsigned rand_seed;
@@ -137,13 +138,13 @@ int round;
 void model();
 inline void addLoads();
 inline void addPathsToMsgs();
-inline void getDirectPath(Coords src, int srcNum, Coords &dst, int dstNum, 
+inline void getDirectPath(Coords src, int srcNum, Coords &dst, int dstNum,
     Path & p, unsigned *seed = 0);
-inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum, 
+inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum,
     Path & p, unsigned *seed = 0);
-inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum, 
+inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum,
     Path &p, unsigned *seed = 0);
-inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum, 
+inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum,
     Path &p, unsigned *seed = 0);
 inline void selectExpansionRequests(bool & expand);
 inline void markExpansionRequests();
@@ -186,7 +187,7 @@ inline void positivetest(double val, string valfor) {
   }
 }
 
-inline void calculateAndPrint(struct timeval & start, struct timeval & end, 
+inline void calculateAndPrint(struct timeval & start, struct timeval & end,
     string out) {
   double time = 0;
   time = (end.tv_sec - start.tv_sec) * 1000;
@@ -230,7 +231,7 @@ int main(int argc, char**argv) {
 
   assert(numAries == (ariesPerGroup*maxCoords.coords[TIER1]));
 
-  numPEs = numAries * maxCoords.coords[NUM_LEVELS] * 
+  numPEs = numAries * maxCoords.coords[NUM_LEVELS] *
            maxCoords.coords[NUM_LEVELS + 1];
 
   aries = new Aries[numAries];
@@ -269,7 +270,7 @@ int main(int argc, char**argv) {
   FILE *groupFile = fopen(intraFile, "rb");
   if(!myRank)
     printf("Reading intraGroup file %s\n", intraFile);
-  
+
   {
     vector< int > greenOffsets, blackOffsets;
     greenOffsets.resize(ariesPerGroup, 0);
@@ -298,7 +299,7 @@ int main(int argc, char**argv) {
   FILE *systemFile = fopen(interFile, "rb");
   if(!myRank)
     printf("Reading interGroup file %s\n", interFile);
-  
+
   {
     vector< int > blueOffsets;
     blueOffsets.resize(numAries, 0);
@@ -367,14 +368,14 @@ int main(int argc, char**argv) {
     for(int g1 = 0; g1 < maxCoords.coords[0]; g1++) {
       printf(" ( ");
       for(int l = 0; l < connectionList[g][g1].size(); l++) {
-        printf("%d ", connectionList[g][g1][l]); 
+        printf("%d ", connectionList[g][g1][l]);
       }
       printf(")");
     }
     printf("\n");
   }
 #endif
-  
+
   double sum = 0;
   myreal MB = 1024 * 1024;
   int currRankBase = 0;
@@ -385,7 +386,7 @@ int main(int argc, char**argv) {
 
   struct timeval startRead, endRead;
   gettimeofday(&startRead, NULL);
-    
+
   while(!feof(conffile)) {
     char cur_comm_file[256] = {0};
     int cur_ranks;
@@ -418,7 +419,7 @@ int main(int argc, char**argv) {
           if(currentCount >= end) break;
           Coords& src = coords[newmsg.src];
           Coords& dst = coords[newmsg.dst];
-          if(src.coords[TIER1] == dst.coords[TIER1] 
+          if(src.coords[TIER1] == dst.coords[TIER1]
               && src.coords[TIER2] == dst.coords[TIER2]
               && src.coords[TIER3] == dst.coords[TIER3]) {
             currentCount++;
@@ -460,10 +461,10 @@ int main(int argc, char**argv) {
 
   if(!myRank) {
     printf("Modeling for following system will be performed:\n");
-    printf("numlevels: %d, dims: %d %d %d %d %d\n", NUM_LEVELS, 
-           maxCoords.coords[0], maxCoords.coords[1], maxCoords.coords[2], 
+    printf("numlevels: %d, dims: %d %d %d %d %d\n", NUM_LEVELS,
+           maxCoords.coords[0], maxCoords.coords[1], maxCoords.coords[2],
            maxCoords.coords[3], maxCoords.coords[4]);
-    printf("numAries: %d, numPEs: %d, numMsgs: %llu, total volume: %.0lf MB\n", 
+    printf("numAries: %d, numPEs: %d, numMsgs: %llu, total volume: %.0lf MB\n",
           numAries, numPEs, numMsgs, sum);
 
     printf("Starting modeling \n");
@@ -488,6 +489,7 @@ inline void printStats() {
   myreal maxLoad = 0, minLoad = FLT_MAX;
   double totalLinkLoad = 0;
   unsigned long long linkCount = 0;
+#if OLD_STATS_ON
   for(int i = 0; i < numAries; i++) {
     for(int j = 0; j < BLUE_END; j++) {
       fprintf(outputFile, "%llu %lf\n", linkCount++, aries[i].linksO[j]);
@@ -496,18 +498,78 @@ inline void printStats() {
       totalLinkLoad += aries[i].linksO[j];
     }
   }
-
-  fclose(outputFile);
-
-  long long totalLinks = numAries*(15+5+((numAries/ariesPerGroup) + 
+  long long numLinks = numAries*(15+5+((numAries/ariesPerGroup) +
                          (numAries % ariesPerGroup) ? 1 : 0));
 
+#else
+  //dump intragroup links first
+  int router = 0;
+  long long numLinks = 0;;
+  for(int row = 0; row < maxCoords.coords[TIER2]; row++) {
+    for(int col = 0; col < maxCoords.coords[TIER3]; col++) {
+      map< int, vector<Link> >::iterator it = intraGroupLinks[router].begin();
+      while(it != intraGroupLinks[router].end()) {
+        for(int l = 0; l < it->second.size(); l++) {
+          int dr = it->first / maxCoords.coords[TIER3];
+          int dc = it->first % maxCoords.coords[TIER3];
+          int linkOff = it->second[l].offset;
+          string linkType;
+          if(it->second[l].type == GREEN) {
+            linkType = "green";
+          } else {
+            linkType = "black";
+          }
+          int groupBase = 0;
+          for(int group = 0; group < maxCoords.coords[TIER1]; group++,
+              groupBase += ariesPerGroup) {
+            double curload = aries[groupBase + router].linksO[linkOff];
+            maxLoad = MAX(maxLoad, curload);
+            minLoad = MIN(minLoad, curload);
+            totalLinkLoad += curload;
+            numLinks++;
+            fprintf(outputFile, "%d %d %d %d %d %d %s %lf\n", group, row, col,
+                group, dr, dc, linkType.c_str(), curload);
+          }
+        }
+        it++;
+      }
+      router++;
+    }
+  }
+  router = 0;
+  for(int group = 0; group < maxCoords.coords[TIER1]; group++) {
+    for(int row = 0; row < maxCoords.coords[TIER2]; row++) {
+      for(int col = 0; col < maxCoords.coords[TIER3]; col++, router++) {
+        map< int, vector<bLink> >::iterator it = interGroupLinks[router].begin();
+        while(it != interGroupLinks[router].end()) {
+          int destG = it->first;
+          for(int l = 0; l < it->second.size(); l++) {
+            assert(destG == it->second[l].dest/ariesPerGroup);
+            int dr = (it->second[l].dest % ariesPerGroup) /
+              maxCoords.coords[TIER3];
+            int dc = it->second[l].dest % maxCoords.coords[TIER3];
+            double curload = aries[router].linksO[it->second[l].offset];
+            maxLoad = MAX(maxLoad, curload);
+            minLoad = MIN(minLoad, curload);
+            totalLinkLoad += curload;
+            numLinks++;
+            fprintf(outputFile, "%d %d %d %d %d %d %s %lf\n", group, row, col,
+                destG, dr, dc, "blue", curload);
+          }
+          it++;
+        }
+      }
+    }
+  }
+#endif
+
+  fclose(outputFile);
   printf("******************Summary*****************\n");
   printf("maxLoad %.2f MB -- minLoad %.2f MB\n",maxLoad,minLoad);
-  printf("averageLinkLoad %.2lf MB \n", totalLinkLoad/totalLinks);
+  printf("averageLinkLoad %.2lf MB \n", totalLinkLoad/numLinks);
 }
 
-inline void getDirectPath(Coords src, int srcNum, Coords &dst, int dstNum, 
+inline void getDirectPath(Coords src, int srcNum, Coords &dst, int dstNum,
     Path & p, unsigned *seed) {
   //same group
   if(src.coords[TIER1] == dst.coords[TIER1]) {
@@ -517,7 +579,7 @@ inline void getDirectPath(Coords src, int srcNum, Coords &dst, int dstNum,
   }
 }
 
-inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum, 
+inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum,
     Path & p, unsigned *seed) {
   //same group
   if(src.coords[TIER1] == dst.coords[TIER1]) {
@@ -565,18 +627,18 @@ inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum,
   }
 }
 
-inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum, 
+inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum,
     Path &p, unsigned *seed) {
   Hop h;
   int usedInter = 0;
-  if(src.coords[TIER2] == dst.coords[TIER2] || 
+  if(src.coords[TIER2] == dst.coords[TIER2] ||
      src.coords[TIER3] == dst.coords[TIER3]) { //if use just 1 link
     h.aries = srcNum;
     vector< Link > & intraLinks =
       intraGroupLinks[aries[srcNum].localRank][aries[dstNum].localRank];
     if(intraLinks.size() > 1) {
-      usedInter = myrand() % intraLinks.size();   
-    } 
+      usedInter = myrand() % intraLinks.size();
+    }
     h.link = intraLinks[usedInter].offset;
     p.push_back(h);
   } else { //two paths, choose 1
@@ -596,15 +658,15 @@ inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum,
     if((myrand() % totalPaths) < gLinks.size()) { //first GREEN, then BLACK
       h.aries = srcNum;
       if(gLinks.size() > 1) {
-        usedInter = myrand() % gLinks.size();   
-      } 
+        usedInter = myrand() % gLinks.size();
+      }
       h.link = gLinks[usedInter].offset;
       p.push_back(h);
       h.aries = gRank;
       vector< Link > & gbLinks =
         intraGroupLinks[aries[gRank].localRank][aries[dstNum].localRank];
       if(gbLinks.size() > 1) {
-        usedInter = myrand() % gbLinks.size();   
+        usedInter = myrand() % gbLinks.size();
       } else {
         usedInter = 0;
       }
@@ -613,15 +675,15 @@ inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum,
     } else { //first BLACK, then GREEN
       h.aries = srcNum;
       if(bLinks.size() > 1) {
-        usedInter = myrand() % bLinks.size();   
-      } 
+        usedInter = myrand() % bLinks.size();
+      }
       h.link = bLinks[usedInter].offset;
       p.push_back(h);
       h.aries = bRank;
       vector< Link > & bgLinks =
         intraGroupLinks[aries[bRank].localRank][aries[dstNum].localRank];
       if(bgLinks.size() > 1) {
-        usedInter = myrand() % bgLinks.size();   
+        usedInter = myrand() % bgLinks.size();
       } else {
         usedInter = 0;
       }
@@ -631,7 +693,7 @@ inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum,
   }
 }
 
-inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum, 
+inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum,
     Path &p, unsigned * seed) {
     Coords interNode;
     int usedInter = 0, interNum;
@@ -640,7 +702,7 @@ inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum,
     vector< int > & intNodes =
       connectionList[src.coords[TIER1]][dstG];
     if(intNodes.size() > 1) {
-      usedInter = myrand() % intNodes.size();   
+      usedInter = myrand() % intNodes.size();
     }
     usedInter = intNodes[usedInter];
     if(usedInter == srcNum) {
@@ -659,8 +721,8 @@ inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum,
     //BLUE link
     Hop h;
     h.aries = interNum;
-    vector< bLink > & interConnections = interGroupLinks[interNum][dstG]; 
-    usedInter = myrand() % interConnections.size();   
+    vector< bLink > & interConnections = interGroupLinks[interNum][dstG];
+    usedInter = myrand() % interConnections.size();
     h.link = interConnections[usedInter].offset;
     usedInter = interConnections[usedInter].dest;
     p.push_back(h);
@@ -669,7 +731,7 @@ inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum,
       assert(coords[usedInter].coords[TIER1] == dst.coords[TIER1]);
       interNode.coords[TIER1] = coords[usedInter].coords[TIER1];
       interNode.coords[TIER2] = coords[usedInter].coords[TIER2];
-      interNode.coords[TIER3] = coords[usedInter].coords[TIER3]; 
+      interNode.coords[TIER3] = coords[usedInter].coords[TIER3];
       coordstoAriesRank(interNum, interNode);
       assert(usedInter == interNum);
       addIntraPath(interNode, interNum, dst, dstNum, p, seed);
@@ -688,7 +750,7 @@ void model() {
     memset(aries, 0, numAries*sizeof(Aries));
     //initialize upper bounds
     for(int i = 0; i < numAries; i++) {
-      aries[i].localRank = coords[i].coords[TIER2] * maxCoords.coords[TIER3] + 
+      aries[i].localRank = coords[i].coords[TIER2] * maxCoords.coords[TIER3] +
                            coords[i].coords[TIER3];
       for(int j = 0; j < BLUE_END; j++) {
         if(j < GREEN_END) aries[i].linksB[j] = GREEN_BW/(myreal)NUM_ITERS;
@@ -736,9 +798,9 @@ void model() {
         }
       }
 
-      MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, 
+      MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE,
                     MPI_SUM, MPI_COMM_WORLD);
-      MPI_Allreduce(MPI_IN_PLACE, pciLoads, numAries*8, MPI_DOUBLE, MPI_SUM, 
+      MPI_Allreduce(MPI_IN_PLACE, pciLoads, numAries*8, MPI_DOUBLE, MPI_SUM,
                     MPI_COMM_WORLD);
 
       linkCount = 0;
@@ -800,7 +862,7 @@ void model() {
     }
   }
 
-  MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, 
+  MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM,
                 MPI_COMM_WORLD);
 
   linkCount = 0;
@@ -835,7 +897,7 @@ inline void addPathsToMsgs() {
     if(currmsg.paths[0].size() != currmsg.paths[1].size()) compare = 0;
     if(compare) {
       for(int i = 0; i < currmsg.paths[0].size(); i++) {
-        if((currmsg.paths[0][i].aries != currmsg.paths[1][i].aries) || 
+        if((currmsg.paths[0][i].aries != currmsg.paths[1][i].aries) ||
            (currmsg.paths[0][i].link != currmsg.paths[1][i].link)) {
           compare = 0;
           break;
@@ -868,9 +930,9 @@ inline void updateMessageAndLinks() {
     }
   }
 
-  MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, 
+  MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM,
                 MPI_COMM_WORLD);
-  MPI_Allreduce(MPI_IN_PLACE, pciLoads, numAries*8, MPI_DOUBLE, MPI_SUM, 
+  MPI_Allreduce(MPI_IN_PLACE, pciLoads, numAries*8, MPI_DOUBLE, MPI_SUM,
                 MPI_COMM_WORLD);
 
   linkCount = 0;
@@ -935,7 +997,7 @@ inline void markExpansionRequests() {
 void selectExpansionRequests(bool & expand) {
   for(size_t m = 0; m < msgsV.size(); m++) {
     Msg &currmsg = msgsV[m];
-    if(aries[currmsg.src].pciSB[currmsg.srcPCI] < CUTOFF_BW || 
+    if(aries[currmsg.src].pciSB[currmsg.srcPCI] < CUTOFF_BW ||
        aries[currmsg.dst].pciRB[currmsg.dstPCI] < CUTOFF_BW) {
       for(int i = 0; i < currmsg.paths.size(); i++) {
         currmsg.expand[i] = false;
@@ -948,7 +1010,7 @@ void selectExpansionRequests(bool & expand) {
     for(size_t i = 0; i < currmsg.paths.size(); i++) {
       currmsg.loads[i] = FLT_MAX;
       for(int j = 0; j < currmsg.paths[i].size(); j++) {
-        currmsg.loads[i] = MIN(currmsg.loads[i], 
+        currmsg.loads[i] = MIN(currmsg.loads[i],
         aries[currmsg.paths[i][j].aries].linksB[currmsg.paths[i][j].link]);
       }
       sum += currmsg.loads[i];
