@@ -515,9 +515,9 @@ inline void printStats() {
           int linkOff = it->second[l].offset;
           string linkType;
           if(it->second[l].type == GREEN) {
-            linkType = "green";
+            linkType = "g";
           } else {
-            linkType = "black";
+            linkType = "k";
           }
           int groupBase = 0;
           for(int group = 0; group < maxCoords.coords[TIER1]; group++,
@@ -554,7 +554,7 @@ inline void printStats() {
             totalLinkLoad += curload;
             numLinks++;
             fprintf(outputFile, "%d %d %d %d %d %d %s %lf\n", group, row, col,
-                destG, dr, dc, "blue", curload);
+                destG, dr, dc, "b", curload);
           }
           it++;
         }
