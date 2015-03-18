@@ -32,20 +32,20 @@ for match in matches:
     if srcgrp == 0:
 	if color == 'blue':
 	    # write to inter-con file
-	    intercon.write(struct.pack('2H', srcrouter, dstrouter))
+	    intercon.write(struct.pack('2i', srcrouter, dstrouter))
 	    print 'INTER', srcrouter, dstrouter
 	else:
 	    # write to intra-con file
 	    if color == 'green':
-		intracon.write(struct.pack('3H', srcrouter, dstrouter, 0))
+		intracon.write(struct.pack('3i', srcrouter, dstrouter, 0))
 		print 'INTRA', srcrouter, dstrouter, 0
 	    else:
-		intracon.write(struct.pack('3H', srcrouter, dstrouter, 1))
+		intracon.write(struct.pack('3i', srcrouter, dstrouter, 1))
 		print 'INTRA', srcrouter, dstrouter, 1
     else:
 	if color == 'blue':
 	    # only write the inter-con file
-	    intercon.write(struct.pack('2H', srcrouter, dstrouter))
+	    intercon.write(struct.pack('2i', srcrouter, dstrouter))
 	    print 'INTER', srcrouter, dstrouter
 
 intracon.close()
