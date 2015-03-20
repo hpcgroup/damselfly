@@ -1,4 +1,5 @@
 build/
 utils/connection/def_connection
 utils/convert/convert
+utils/job_placement/compact/genMapping
 utils/job_placement/randomNodes/genMapping
