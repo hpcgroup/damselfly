@@ -41,11 +41,13 @@ int main(int argc, char**argv) {
   }
 
   int dims[5];
-  int target = 0, cores = 0, jobid = 0;
+  int target = 0, coresperjob = 0, jobid = 0, totalcores = 0;
 
   /* currently only works for certain job sizes -- larger than a group
    * for single jobs and non-multiples of group size for job workloads */
-  for(int currentGroup = 0; currentGroup < (totalNumCores/(numrows * numcols * numnodesperrouter * numcores)); currentGroup++) {
+  for(int currentGroup = 0; currentGroup <= (totalNumCores/(numrows * numcols * numnodesperrouter * numcores)); currentGroup++) {
+    if(totalcores == totalNumCores)
+      break;
     target = currentGroup * numrows * numcols * numnodesperrouter * numcores;
     for(int i = 0; i < (numrows * numcols * numnodesperrouter * numcores); i++) {
       rankToCoords(target, dims);
@@ -55,12 +57,15 @@ int main(int argc, char**argv) {
       printf("%d\n", jobid);
       target++;
 
-      cores++;
-      if(cores == jobSizes[jobid]) {
-	// printf("%d %d\n", cores, jobid);
+      coresperjob++;
+      totalcores++;
+      if(coresperjob == jobSizes[jobid]) {
+	// printf("%d %d\n", coresperjob, jobid);
 	jobid++;
-	cores = 0;
+	coresperjob = 0;
       }
+      if(totalcores == totalNumCores)
+	break;
     }
   }
 }
