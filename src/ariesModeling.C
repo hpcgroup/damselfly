@@ -254,10 +254,13 @@ int main(int argc, char**argv) {
   } else {
     if(!myRank)
       printf("Reading mapfile\n");
+    int jobid;	// ignore for now
+
     for(int i = 0; i < numPEs; i++) {
       for(int j = 0; j < NUM_COORDS; j++) {
         fscanf(mapfile, "%d", &coords[i].coords[j]);
       }
+      fscanf(mapfile, "%d", &jobid);
     }
   }
   if(mapfile != NULL)

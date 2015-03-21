@@ -31,12 +31,12 @@ int main(int argc, char**argv) {
   numnodesperrouter = atoi(argv[4]);
   numcores = atoi(argv[5]);
   int numJobs = argc - 6;
-  int totalNumCores = 0;
+  int numAllocCores = 0;
 
   jobSizes.resize(numJobs);
   for(int i=0; i<numJobs; i++) {
     jobSizes[i] = atoi(argv[i+6]);
-    totalNumCores += jobSizes[i];
+    numAllocCores += jobSizes[i];
     // printf("%d ", jobSizes[i]);
   }
 
@@ -45,8 +45,8 @@ int main(int argc, char**argv) {
 
   /* currently only works for certain job sizes -- larger than a group
    * for single jobs and non-multiples of group size for job workloads */
-  for(int currentGroup = 0; currentGroup <= (totalNumCores/(numrows * numcols * numnodesperrouter * numcores)); currentGroup++) {
-    if(totalcores == totalNumCores)
+  for(int currentGroup = 0; currentGroup <= (numAllocCores/(numrows * numcols * numnodesperrouter * numcores)); currentGroup++) {
+    if(totalcores == numAllocCores)
       break;
     target = currentGroup * numrows * numcols * numnodesperrouter * numcores;
     for(int i = 0; i < (numrows * numcols * numnodesperrouter * numcores); i++) {
@@ -64,7 +64,7 @@ int main(int argc, char**argv) {
 	jobid++;
 	coresperjob = 0;
       }
-      if(totalcores == totalNumCores)
+      if(totalcores == numAllocCores)
 	break;
     }
   }

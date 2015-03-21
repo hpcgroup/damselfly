@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string.h>
+#include <math.h>
 #include <vector>
 
 using namespace std;
@@ -32,50 +33,55 @@ int main(int argc, char**argv) {
   numnodesperrouter = atoi(argv[4]);
   numcores = atoi(argv[5]);
   int numJobs = argc - 6;
-  int totalNumCores = 0;
+  int numAllocCores = 0;
 
   jobSizes.resize(numJobs);
   for(int i=0; i<numJobs; i++) {
     jobSizes[i] = atoi(argv[i+6]);
-    totalNumCores += jobSizes[i];
+    numAllocCores += jobSizes[i];
     // printf("%d ", jobSizes[i]);
   }
 
-  int numtotalnodes = numgroups*numrows*numcols*numnodesperrouter;
-  int *placed = new int[numtotalnodes];
-  int *jobmap = new int[totalNumCores/numcores];
+  int numNodes = numgroups * numrows * numcols * numnodesperrouter;
+  int numAllocNodes = ceil((double)(numAllocCores)/(double)(numcores));
+
+  int *placed = new int[numNodes];
+  int *jobmap = new int[numAllocNodes];
+  memset(placed, 0, sizeof(int)*numNodes);
 
   srand(101429);
 
-  memset(placed, 0, sizeof(int)*numtotalnodes);
   int currentNode = 0;
-  for(int i = 0; i < 8*(totalNumCores/numcores); i++) {
-    int target = rand() % numtotalnodes;
+  /* try and find as many random nodes as possible in 8*numAllocNodes trials */
+  for(int i = 0; i < 8 * numAllocNodes; i++) {
+    int target = rand() % numNodes;
     if(placed[target] == 0) {
       placed[target] = 1;
       jobmap[currentNode] = target;
       currentNode++;
-      if(currentNode == (totalNumCores/numcores)) {
+      if(currentNode == numAllocNodes) {
 	break;
       }
     }
   }
 
+  /* fill remaining nodes in jobmap if any in order */
   int target = 0;
-  if(currentNode != (totalNumCores/numcores)) {
-    for(; currentNode < (totalNumCores/numcores); currentNode++) {
-      while(placed[target] == 1) {
-	target++;
-      }
-      placed[target] = 1;
-      jobmap[currentNode] = target;
+  for(; currentNode < numAllocNodes; currentNode++) {
+    while(placed[target] == 1) {
+      target++;
     }
+    placed[target] = 1;
+    jobmap[currentNode] = target;
+    target++;
   }
 
   int dims[5];
-  int coresperjob = 0, jobid = 0;
+  int coresperjob = 0, jobid = 0, totalcores = 0;
 
-  for(currentNode = 0; currentNode < (totalNumCores/numcores); currentNode++) {
+  for(currentNode = 0; currentNode < numAllocNodes; currentNode++) {
+    if(totalcores == numAllocCores)
+      break;
     target = jobmap[currentNode]*numcores;
     for(int i = 0; i < numcores; i++) {
       rankToCoords(target, dims);
@@ -86,11 +92,14 @@ int main(int argc, char**argv) {
       target++;
 
       coresperjob++;
+      totalcores++;
       if(coresperjob == jobSizes[jobid]) {
         // printf("%d %d\n", coresperjob, jobid);
         jobid++;
         coresperjob = 0;
       }
+      if(totalcores == numAllocCores)
+        break;
     }
   }
 }
