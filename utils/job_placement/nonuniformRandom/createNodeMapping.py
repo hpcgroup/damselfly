@@ -14,6 +14,7 @@
 
 from sys import argv,exit
 import numpy as np
+import struct
 from math import *
 import random 
 from __builtin__ import True
@@ -110,8 +111,8 @@ def rank_to_coords(rank,groups,rows,columns,nodes_per_router,cores_per_node):
     return dims
 
 
-if len(argv) < 7:
-    print "Usage: %s <numGroups> <numRows> <numColumns> <numNodesPerRouter> <numCoresPerNode>  [Binomial|Geometric] <p> <#cores task 1> .... <#cores task N>"
+if len(argv) < 10:
+    print "Usage: %s <numGroups> <numRows> <numColumns> <numNodesPerRouter> <numCoresPerNode>  [Binomial|Geometric] <p> <output filename> <#cores task 1> .... <#cores task N>"
     exit(0)
     
 
@@ -125,11 +126,12 @@ nodes_per_router = int(argv[4])
 cores_per_node = int(argv[5])
 dist = argv[6]
 p = float(argv[7])
+binout = open(argv[8], "wb")
 
 # Compute the system size
 node_count = groups*rows*columns*nodes_per_router
 core_count = node_count*cores_per_node
-task_sizes = [int(arg) for arg in argv[8:]]
+task_sizes = [int(arg) for arg in argv[9:]]
 
 # Create a list of tasks
 tasks = range(0,len(task_sizes))
@@ -228,6 +230,7 @@ for t in xrange(0,len(tasks)):
      for rank in x[0]:
         dims = rank_to_coords(rank, groups, rows, columns, nodes_per_router, cores_per_node)
         print "%d %d %d %d %d %d" % (dims[0],dims[1],dims[2],dims[3],dims[4],t)
-            
+        binout.write(struct.pack('6i', dims[0], dims[1], dims[2], dims[3], dims[4], t))
 
+binout.close()
 

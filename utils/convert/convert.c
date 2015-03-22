@@ -15,4 +15,7 @@ int main(int argc, char** argv) {
     fwrite(&dst, sizeof(int), 1, output);
     fwrite(&bytes, sizeof(double), 1, output);
   }
+
+  fclose(input);
+  fclose(output);
 }

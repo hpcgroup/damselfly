@@ -12,4 +12,4 @@ scal: genMapping.C
 	$(PREP) $(CC) -o genMapping.scal $< $(CFLAGS) $(SCALIB)
 
 clean:
-	rm -f *.o genMapping charmrun
+	rm -f *.o genMapping

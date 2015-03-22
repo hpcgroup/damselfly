@@ -32,12 +32,13 @@ int main(int argc, char**argv) {
   numcols = atoi(argv[3]);
   numnodesperrouter = atoi(argv[4]);
   numcores = atoi(argv[5]);
-  int numJobs = argc - 6;
+  FILE *binout = fopen(argv[6], "wb");
+  int numJobs = argc - 7;
   int numAllocCores = 0;
 
   jobSizes.resize(numJobs);
   for(int i=0; i<numJobs; i++) {
-    jobSizes[i] = atoi(argv[i+6]);
+    jobSizes[i] = atoi(argv[i+7]);
     numAllocCores += jobSizes[i];
     // printf("%d ", jobSizes[i]);
   }
@@ -87,8 +88,10 @@ int main(int argc, char**argv) {
       rankToCoords(target, dims);
       for(int j = 0; j < 5; j++) {
 	printf("%d ", dims[j]);
+	fwrite(&dims[j], sizeof(int), 1, binout);
       }
       printf("%d\n", jobid);
+      fwrite(&jobid, sizeof(int), 1, binout);
       target++;
 
       coresperjob++;
@@ -102,4 +105,6 @@ int main(int argc, char**argv) {
         break;
     }
   }
+
+  fclose(binout);
 }

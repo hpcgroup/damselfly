@@ -207,13 +207,14 @@ int main(int argc, char**argv) {
   }
 
   if(!myRank) {
-    printf("Processing command line and conffile\n");
+    printf("========== Dragonfly Network Model-based Simulator ==========\n");
+    printf("Processing configuration file: %s\n", argv[1]);
   }
 
   FILE *conffile = fopen(argv[1],"r");
   nulltest((void*)conffile, "configuration file");
 
-  FILE *mapfile = fopen(argv[2],"r");
+  FILE *mapfile = fopen(argv[2], "rb");
 
   if(!myRank) {
     outputFile = fopen(argv[3], "w");
@@ -240,6 +241,7 @@ int main(int argc, char**argv) {
   coords = new Coords[numPEs];
   nulltest((void*)coords, "coordinates of PEs");
 
+  double t1;
   /* Read the mapping of MPI ranks to hardware nodes */
   if(mapfile == NULL) {
     if(!myRank)
@@ -252,19 +254,21 @@ int main(int argc, char**argv) {
       }
     }
   } else {
-    if(!myRank)
-      printf("Reading mapfile\n");
+    if(!myRank) {
+      t1 = MPI_Wtime();
+    }
     int jobid;	// ignore for now
 
     for(int i = 0; i < numPEs; i++) {
-      for(int j = 0; j < NUM_COORDS; j++) {
-        fscanf(mapfile, "%d", &coords[i].coords[j]);
-      }
-      fscanf(mapfile, "%d", &jobid);
+      fread(&coords[i], sizeof(int), 5, mapfile);
+      fread(&jobid, sizeof(int), 1, mapfile);
     }
   }
-  if(mapfile != NULL)
+  if(mapfile != NULL) {
     fclose(mapfile);
+    if(!myRank)
+      printf("Reading mapfile %f\n", MPI_Wtime() - t1);
+  }
 
   // read intra group connections, store from a router's perspective
   // all links to the same router form a vector
