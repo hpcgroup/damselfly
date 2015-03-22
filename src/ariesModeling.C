@@ -189,11 +189,11 @@ inline void positivetest(double val, string valfor) {
 
 inline void calculateAndPrint(struct timeval & start, struct timeval & end,
     string out) {
-  double time = 0;
-  time = (end.tv_sec - start.tv_sec) * 1000;
+  double time = 0.0;
+  time = (end.tv_sec - start.tv_sec) * 1000.0;
   time += ((end.tv_usec - start.tv_usec)/1000.0);
 
-  printf("%s : %.3lf ms\n", out.c_str(), time);
+  printf("%s: %.3lfs\n", out.c_str(), time/1000.0);
 }
 
 int main(int argc, char**argv) {
@@ -255,6 +255,7 @@ int main(int argc, char**argv) {
     }
   } else {
     if(!myRank) {
+      printf("Reading job placement file: %s\n", argv[2]);
       t1 = MPI_Wtime();
     }
     int jobid;	// ignore for now
@@ -267,7 +268,7 @@ int main(int argc, char**argv) {
   if(mapfile != NULL) {
     fclose(mapfile);
     if(!myRank)
-      printf("Reading mapfile %f\n", MPI_Wtime() - t1);
+      printf("Time for reading job placement file: %0.3fs\n", MPI_Wtime() - t1);
   }
 
   // read intra group connections, store from a router's perspective
@@ -276,7 +277,7 @@ int main(int argc, char**argv) {
   fscanf(conffile, "%s", intraFile);
   FILE *groupFile = fopen(intraFile, "rb");
   if(!myRank)
-    printf("Reading intraGroup file %s\n", intraFile);
+    printf("Reading intra-group connectivity file: %s\n", intraFile);
 
   {
     vector< int > greenOffsets, blackOffsets;
@@ -305,7 +306,7 @@ int main(int argc, char**argv) {
   fscanf(conffile, "%s", interFile);
   FILE *systemFile = fopen(interFile, "rb");
   if(!myRank)
-    printf("Reading interGroup file %s\n", interFile);
+    printf("Reading inter-group connectivity file: %s\n", interFile);
 
   {
     vector< int > blueOffsets;
@@ -388,9 +389,6 @@ int main(int argc, char**argv) {
   int currRankBase = 0;
 
   /* Read the communication graph which is in edge-list format */
-  if(!myRank)
-    printf("Reading messages\n");
-
   struct timeval startRead, endRead;
   gettimeofday(&startRead, NULL);
 
@@ -414,8 +412,10 @@ int main(int argc, char**argv) {
       fseek(commfile, begin*16, SEEK_SET);
       MsgSDB newMsgSDB;
 
-      if(!myRank)
-        printf("Reading  %s %d %llu\n", cur_comm_file, numRanks, numMsgs);
+      if(!myRank) {
+        printf("Reading communication-graph file: %s\n", cur_comm_file);
+	printf("Number of edges: %llu\n", numMsgs);
+      }
 
       while(!feof(commfile)) {
         Msg newmsg;
@@ -464,17 +464,18 @@ int main(int argc, char**argv) {
 
   gettimeofday(&endRead, NULL);
   if(!myRank)
-    calculateAndPrint(startRead, endRead, "time to read communication pattern");
+    calculateAndPrint(startRead, endRead, "Time for reading communication-graph file");
 
   if(!myRank) {
-    printf("Modeling for following system will be performed:\n");
-    printf("numlevels: %d, dims: %d %d %d %d %d\n", NUM_LEVELS,
+    printf("\n");
+    printf("--------------- Network configuration details ---------------\n");
+    printf("#Levels: %d, #Groups: %d #Rows: %d #Columns: %d #Nodes: %d #Cores: %d\n", NUM_LEVELS,
            maxCoords.coords[0], maxCoords.coords[1], maxCoords.coords[2],
            maxCoords.coords[3], maxCoords.coords[4]);
-    printf("numAries: %d, numPEs: %d, numMsgs: %llu, total volume: %.0lf MB\n",
+    printf("Total #Routers: %d, #Cores: %d, #Messages: %llu, Volume: %.0lf MB\n\n",
           numAries, numPEs, numMsgs, sum);
 
-    printf("Starting modeling \n");
+    printf("---------------------- Start modeling -----------------------\n");
   }
 
   struct timeval startModel, endModel;
@@ -482,7 +483,8 @@ int main(int argc, char**argv) {
   model();
   gettimeofday(&endModel, NULL);
   if(!myRank) {
-    calculateAndPrint(startModel, endModel, "time to model");
+    calculateAndPrint(startModel, endModel, "Time for modeling");
+    printf("==================== Simulation complete ====================\n");
   }
 
   MPI_Barrier(MPI_COMM_WORLD);
@@ -571,9 +573,9 @@ inline void printStats() {
 #endif
 
   fclose(outputFile);
-  printf("******************Summary*****************\n");
-  printf("maxLoad %.2f MB -- minLoad %.2f MB\n",maxLoad,minLoad);
-  printf("averageLinkLoad %.2lf MB \n", totalLinkLoad/numLinks);
+  printf("\n");
+  printf("-------------------------- Summary --------------------------\n");
+  printf("Bytes/link (MB) Min: %.2f Avg: %.2lf Max: %.2f\n", minLoad, totalLinkLoad/numLinks, maxLoad);
 }
 
 inline void getDirectPath(Coords src, int srcNum, Coords &dst, int dstNum,
