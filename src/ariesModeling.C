@@ -260,9 +260,10 @@ int main(int argc, char**argv) {
     }
     int jobid;	// ignore for now
 
-    for(int i = 0; i < numPEs; i++) {
-      fread(&coords[i], sizeof(int), 5, mapfile);
+    int i = 0;
+    while(fread(&coords[i], sizeof(int), 5, mapfile) != 0) {
       fread(&jobid, sizeof(int), 1, mapfile);
+      i++;
     }
   }
   if(mapfile != NULL) {
@@ -469,11 +470,10 @@ int main(int argc, char**argv) {
   if(!myRank) {
     printf("\n");
     printf("--------------- Network configuration details ---------------\n");
-    printf("#Levels: %d, #Groups: %d #Rows: %d #Columns: %d #Nodes: %d #Cores: %d\n", NUM_LEVELS,
+    printf("#Groups: %d #Rows: %d #Columns: %d #Nodes: %d #Cores: %d\n",
            maxCoords.coords[0], maxCoords.coords[1], maxCoords.coords[2],
            maxCoords.coords[3], maxCoords.coords[4]);
-    printf("Total #Routers: %d, #Cores: %d, #Messages: %llu, Volume: %.0lf MB\n\n",
-          numAries, numPEs, numMsgs, sum);
+    printf("Total #Routers: %d, #Cores: %d\n\n", numAries, numPEs);
 
     printf("---------------------- Start modeling -----------------------\n");
   }
