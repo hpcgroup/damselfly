@@ -158,46 +158,6 @@ cores = np.zeros(core_count)
 # List of empty nodes slots
 empty = list(xrange(0,node_count))
 
-# For all tasks
-for t,size,dist in zip(tasks,task_sizes,task_distributions):
-    #print "Started task ", i, size
-    count = 0
-    while count < size:
-        
-        # Choose a random node
-        elem = random.choice(empty)
-        
-        # Get a uniform random number 
-        test = np.random.uniform()
-             
-        # Get the current pmf value for the distribution
-        current = dist.adjustedPMF(elem)
-
-        if current < 0:
-            print "Current ", current, " of ", elem, "  tested against ", test
-            print dist.pmf(elem), dist.fill_sum
-            exit(0)
-        # If we pass the test
-        if test < current:
-            #print "Picked node", elem, " ", (size-count)/cores_per_node, " left to pick"
-            #print "Current ", current, dist.pmf(elem)," of ", elem, "  tested against ", test
-            
-            # Now fill up all the cores as long as 
-            # we have tasks
-            i = 0
-            while i<cores_per_node and count<size:
-                cores[elem*cores_per_node + i] = t+1
-                i += 1
-                count += 1
-             
-            # Remove the node from the empty list
-            empty.remove(elem)
-            
-            # Adjust all distributions to include another filled element
-            for d in task_distributions:
-                d.fillSlot(elem)
-                
-
 
 
 if True:
@@ -216,21 +176,12 @@ if True:
         ax.plot(xrange(0,cores_per_node*node_count,cores_per_node),pmf,colors[t])
     
     #print ""
-    for t in tasks:
-        #print "Colors ", symbol[t]
-        x = np.where(cores == t+1)
-        ax.plot(x,[(t+1)*scale/len(tasks) ]*len(x),symbol[t])
-        #print x
+#    for t in tasks:
+#        #print "Colors ", symbol[t]
+#        x = np.where(cores == t+1)
+#        ax.plot(x,[(t+1)*scale/len(tasks) ]*len(x),symbol[t])
+#        #print x
     
     plt.show()
 
-for t in xrange(0,len(tasks)):
-     x = np.where(cores == t+1)
-     #print x
-     for rank in x[0]:
-        dims = rank_to_coords(rank, groups, rows, columns, nodes_per_router, cores_per_node)
-        print "%d %d %d %d %d %d" % (dims[0],dims[1],dims[2],dims[3],dims[4],t)
-        binout.write(struct.pack('6i', dims[0], dims[1], dims[2], dims[3], dims[4], t))
-
-binout.close()
 
