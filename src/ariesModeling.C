@@ -513,7 +513,9 @@ inline void printStats() {
 #else
   //dump intragroup links first
   int router = 0;
-  long long numLinks = 0;;
+  long long numLinks = 0;
+
+  fprintf(outputFile, "#sg,sr,sc,dg,dr,dc,color,bytes\n");
   for(int row = 0; row < maxCoords.coords[TIER2]; row++) {
     for(int col = 0; col < maxCoords.coords[TIER3]; col++) {
       map< int, vector<Link> >::iterator it = intraGroupLinks[router].begin();
@@ -536,7 +538,7 @@ inline void printStats() {
             minLoad = MIN(minLoad, curload);
             totalLinkLoad += curload;
             numLinks++;
-            fprintf(outputFile, "%d %d %d %d %d %d %s %lf\n", group, row, col,
+            fprintf(outputFile, "%d,%d,%d,%d,%d,%d,%s,%lf\n", group, row, col,
                 group, dr, dc, linkType.c_str(), curload);
           }
         }
@@ -562,7 +564,7 @@ inline void printStats() {
             minLoad = MIN(minLoad, curload);
             totalLinkLoad += curload;
             numLinks++;
-            fprintf(outputFile, "%d %d %d %d %d %d %s %lf\n", group, row, col,
+            fprintf(outputFile, "%d,%d,%d,%d,%d,%d,%s,%lf\n", group, row, col,
                 destG, dr, dc, "b", curload);
           }
           it++;
