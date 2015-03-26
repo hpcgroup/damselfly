@@ -515,7 +515,7 @@ inline void printStats() {
   int router = 0;
   long long numLinks = 0;
 
-  fprintf(outputFile, "#sg,sr,sc,dg,dr,dc,color,bytes\n");
+  fprintf(outputFile, "sg,sr,sc,dg,dr,dc,color,bytes\n");
   for(int row = 0; row < maxCoords.coords[TIER2]; row++) {
     for(int col = 0; col < maxCoords.coords[TIER3]; col++) {
       map< int, vector<Link> >::iterator it = intraGroupLinks[router].begin();

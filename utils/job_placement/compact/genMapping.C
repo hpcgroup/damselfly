@@ -44,6 +44,8 @@ int main(int argc, char**argv) {
   int dims[5];
   int target = 0, coresperjob = 0, jobid = 0, totalcores = 0;
 
+  printf("g,r,c,n,core,jobid\n");
+
   /* currently only works for certain job sizes -- larger than a group
    * for single jobs and non-multiples of group size for job workloads */
   for(int currentGroup = 0; currentGroup <= (numAllocCores/(numrows * numcols * numnodesperrouter * numcores)); currentGroup++) {
