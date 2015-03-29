@@ -9,6 +9,7 @@
 #include <sys/time.h>
 #include <cfloat>
 #include <mpi.h>
+#include "Config.h"
 
 #define BIASED_ROUTING 1
 
@@ -106,6 +107,7 @@ typedef struct Msg {
   vector< bool > expand;
   vector< myreal > loads;
   vector< myreal > allocated;
+  int jobID;
 } Msg;
 
 typedef struct MsgSDB {
@@ -130,9 +132,12 @@ Coords *coords; // rank to coordinates
 Aries *aries; // link status of current nodes
 int ariesPerGroup;
 FILE *outputFile;
+vector<FILE *> jobOutputFiles;
 int myRank, numRanks;
 double *linkLoads, *pciLoads;
 int round;
+int num_jobs;
+vector< double * > jobLinkLoads;
 
 //forward declaration
 void model();
@@ -393,9 +398,11 @@ int main(int argc, char**argv) {
   struct timeval startRead, endRead;
   gettimeofday(&startRead, NULL);
 
+  num_jobs = -1;
   while(!feof(conffile)) {
     char cur_comm_file[256] = {0};
     int cur_ranks;
+    num_jobs++;
 
     fscanf(conffile, "%s", cur_comm_file);
     if(strcmp(cur_comm_file, "") != 0) {
@@ -439,6 +446,7 @@ int main(int argc, char**argv) {
           coordstoAriesRank(newmsg.src, coords[newmsg.src]);
           coordstoAriesRank(newmsg.dst, coords[newmsg.dst]);
           newmsg.bw = 0;
+          newmsg.jobID = num_jobs;
           msgsV.push_back(newmsg);
           sum += newmsg.bytes;
           currentCount++;
@@ -466,6 +474,23 @@ int main(int argc, char**argv) {
   gettimeofday(&endRead, NULL);
   if(!myRank)
     calculateAndPrint(startRead, endRead, "Time for reading communication-graph file");
+
+#if JOB_SPECIFIC_TRAFFIC
+  jobLinkLoads.resize(num_jobs);
+  for(int i = 0; i < num_jobs; i++) {
+    jobLinkLoads[i] = new double[numAries * BLUE_END];
+    memset(jobLinkLoads[i], 0, numAries * BLUE_END * sizeof(double));
+  }
+  if(!myRank) {
+    jobOutputFiles.resize(num_jobs);
+    for(int i = 0; i < num_jobs; i++) {
+      char outputfile_name[256];
+      sprintf(outputfile_name, "%s_job%d", argv[3], i);
+      jobOutputFiles[i] = fopen(outputfile_name, "w");
+    }
+  }
+#endif
+
 
   if(!myRank) {
     printf("\n");
@@ -516,6 +541,12 @@ inline void printStats() {
   long long numLinks = 0;
 
   fprintf(outputFile, "#sg,sr,sc,dg,dr,dc,color,bytes\n");
+#if JOB_SPECIFIC_TRAFFIC
+  for(int job = 0; job < num_jobs; job++) {
+    fprintf(jobOutputFiles[job], "#sg,sr,sc,dg,dr,dc,color,bytes\n");
+  }
+#endif
+
   for(int row = 0; row < maxCoords.coords[TIER2]; row++) {
     for(int col = 0; col < maxCoords.coords[TIER3]; col++) {
       map< int, vector<Link> >::iterator it = intraGroupLinks[router].begin();
@@ -540,6 +571,14 @@ inline void printStats() {
             numLinks++;
             fprintf(outputFile, "%d,%d,%d,%d,%d,%d,%s,%lf\n", group, row, col,
                 group, dr, dc, linkType.c_str(), curload);
+#if JOB_SPECIFIC_TRAFFIC
+            int link_off = (groupBase + router) * BLUE_END + linkOff;
+            for(int job = 0; job < num_jobs; job++) {
+              double curload = jobLinkLoads[job][link_off];
+              fprintf(jobOutputFiles[job], "%d,%d,%d,%d,%d,%d,%s,%lf\n", group,
+                  row, col, group, dr, dc, linkType.c_str(), curload);
+            }
+#endif
           }
         }
         it++;
@@ -566,6 +605,14 @@ inline void printStats() {
             numLinks++;
             fprintf(outputFile, "%d,%d,%d,%d,%d,%d,%s,%lf\n", group, row, col,
                 destG, dr, dc, "b", curload);
+#if JOB_SPECIFIC_TRAFFIC
+            int link_off = router * BLUE_END + it->second[l].offset;
+            for(int job = 0; job < num_jobs; job++) {
+              double curload = jobLinkLoads[job][link_off];
+              fprintf(jobOutputFiles[job], "%d,%d,%d,%d,%d,%d,%s,%lf\n", group,
+                  row, col, destG, dr, dc, "b", curload);
+            }
+#endif
           }
           it++;
         }
@@ -575,6 +622,11 @@ inline void printStats() {
 #endif
 
   fclose(outputFile);
+#if JOB_SPECIFIC_TRAFFIC
+  for(int i = 0; i < num_jobs; i++) {
+    fclose(jobOutputFiles[i]);
+  }
+#endif
   printf("\n");
   printf("-------------------------- Summary --------------------------\n");
   printf("Bytes/link (MB) Min: %.2f Avg: %.2lf Max: %.2f\n", minLoad, totalLinkLoad/numLinks, maxLoad);
@@ -866,6 +918,7 @@ void model() {
       printf("Number of iterations executed: %d\n", iter);
   }
 
+  //copy to contiguous buffer and reduce across all nodes
   unsigned long long linkCount = 0;
   for(int i = 0; i < numAries; i++) {
     for(int j = 0; j < BLUE_END; j++) {
@@ -882,6 +935,18 @@ void model() {
       aries[i].linksO[j] = linkLoads[linkCount++];
     }
   }
+
+#if JOB_SPECIFIC_TRAFFIC
+  for(int job = 0; job < num_jobs; job++) {
+    if(myRank == 0) {
+      MPI_Reduce(MPI_IN_PLACE, jobLinkLoads[job], numAries*BLUE_END,
+          MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    } else {
+      MPI_Reduce(jobLinkLoads[job], jobLinkLoads[job], numAries*BLUE_END,
+          MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    }
+  }
+#endif
 
   if(myRank) {
     MPI_Barrier(MPI_COMM_WORLD);
@@ -982,6 +1047,11 @@ inline void updateMessageAndLinks() {
           myreal pathLoad = currmsg.bytes*(min/currmsg.bw);
           for(size_t j = 0; j < currmsg.paths[i].size(); j++) {
             aries[currmsg.paths[i][j].aries].linksSum[currmsg.paths[i][j].link] += pathLoad;
+#if JOB_SPECIFIC_TRAFFIC
+            int link_off = currmsg.paths[i][j].aries * BLUE_END;
+            link_off += currmsg.paths[i][j].link;
+            jobLinkLoads[currmsg.jobID][link_off] += pathLoad;
+#endif
           }
         }
       }
