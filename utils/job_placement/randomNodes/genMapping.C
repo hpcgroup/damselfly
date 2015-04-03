@@ -80,6 +80,8 @@ int main(int argc, char**argv) {
   int dims[5];
   int coresperjob = 0, jobid = 0, totalcores = 0;
 
+  printf("g,r,c,n,core,jobid\n");
+
   for(currentNode = 0; currentNode < numAllocNodes; currentNode++) {
     if(totalcores == numAllocCores)
       break;

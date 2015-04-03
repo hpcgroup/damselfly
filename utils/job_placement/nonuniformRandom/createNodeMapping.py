@@ -224,12 +224,13 @@ if False:
     
     plt.show()
 
+print "g,r,c,n,core,jobid"
 for t in xrange(0,len(tasks)):
      x = np.where(cores == t+1)
      #print x
      for rank in x[0]:
         dims = rank_to_coords(rank, groups, rows, columns, nodes_per_router, cores_per_node)
-        print "%d %d %d %d %d %d" % (dims[0],dims[1],dims[2],dims[3],dims[4],t)
+        print "%d,%d,%d,%d,%d,%d" % (dims[0],dims[1],dims[2],dims[3],dims[4],t)
         binout.write(struct.pack('6i', dims[0], dims[1], dims[2], dims[3], dims[4], t))
 
 binout.close()

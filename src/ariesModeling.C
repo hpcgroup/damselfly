@@ -540,10 +540,10 @@ inline void printStats() {
   int router = 0;
   long long numLinks = 0;
 
-  fprintf(outputFile, "#sg,sr,sc,dg,dr,dc,color,bytes\n");
+  fprintf(outputFile, "sg,sr,sc,dg,dr,dc,color,bytes\n");
 #if JOB_SPECIFIC_TRAFFIC
   for(int job = 0; job < num_jobs; job++) {
-    fprintf(jobOutputFiles[job], "#sg,sr,sc,dg,dr,dc,color,bytes\n");
+    fprintf(jobOutputFiles[job], "sg,sr,sc,dg,dr,dc,color,bytes\n");
   }
 #endif
 
