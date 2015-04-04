@@ -132,7 +132,6 @@ Coords *coords; // rank to coordinates
 Aries *aries; // link status of current nodes
 int ariesPerGroup;
 FILE *outputFile;
-vector<FILE *> jobOutputFiles;
 int myRank, numRanks;
 double *linkLoads, *pciLoads;
 int round;
@@ -481,14 +480,6 @@ int main(int argc, char**argv) {
     jobLinkLoads[i] = new double[numAries * BLUE_END];
     memset(jobLinkLoads[i], 0, numAries * BLUE_END * sizeof(double));
   }
-  if(!myRank) {
-    jobOutputFiles.resize(num_jobs);
-    for(int i = 0; i < num_jobs; i++) {
-      char outputfile_name[256];
-      sprintf(outputfile_name, "%s_job%d", argv[3], i);
-      jobOutputFiles[i] = fopen(outputfile_name, "w");
-    }
-  }
 #endif
 
 
@@ -540,12 +531,13 @@ inline void printStats() {
   int router = 0;
   long long numLinks = 0;
 
-  fprintf(outputFile, "sg,sr,sc,dg,dr,dc,color,bytes\n");
+  fprintf(outputFile, "sg,sr,sc,dg,dr,dc,color,bytes");
 #if JOB_SPECIFIC_TRAFFIC
   for(int job = 0; job < num_jobs; job++) {
-    fprintf(jobOutputFiles[job], "sg,sr,sc,dg,dr,dc,color,bytes\n");
+    fprintf(outputFile, ",job%d",job);
   }
 #endif
+  fprintf(outputFile, "\n");
 
   for(int row = 0; row < maxCoords.coords[TIER2]; row++) {
     for(int col = 0; col < maxCoords.coords[TIER3]; col++) {
@@ -569,16 +561,16 @@ inline void printStats() {
             minLoad = MIN(minLoad, curload);
             totalLinkLoad += curload;
             numLinks++;
-            fprintf(outputFile, "%d,%d,%d,%d,%d,%d,%s,%lf\n", group, row, col,
+            fprintf(outputFile, "%d,%d,%d,%d,%d,%d,%s,%lf", group, row, col,
                 group, dr, dc, linkType.c_str(), curload);
 #if JOB_SPECIFIC_TRAFFIC
             int link_off = (groupBase + router) * BLUE_END + linkOff;
             for(int job = 0; job < num_jobs; job++) {
               double curload = jobLinkLoads[job][link_off];
-              fprintf(jobOutputFiles[job], "%d,%d,%d,%d,%d,%d,%s,%lf\n", group,
-                  row, col, group, dr, dc, linkType.c_str(), curload);
+              fprintf(outputFile, ",%lf", curload);
             }
 #endif
+            fprintf(outputFile, "\n");
           }
         }
         it++;
@@ -603,16 +595,16 @@ inline void printStats() {
             minLoad = MIN(minLoad, curload);
             totalLinkLoad += curload;
             numLinks++;
-            fprintf(outputFile, "%d,%d,%d,%d,%d,%d,%s,%lf\n", group, row, col,
+            fprintf(outputFile, "%d,%d,%d,%d,%d,%d,%s,%lf", group, row, col,
                 destG, dr, dc, "b", curload);
 #if JOB_SPECIFIC_TRAFFIC
             int link_off = router * BLUE_END + it->second[l].offset;
             for(int job = 0; job < num_jobs; job++) {
               double curload = jobLinkLoads[job][link_off];
-              fprintf(jobOutputFiles[job], "%d,%d,%d,%d,%d,%d,%s,%lf\n", group,
-                  row, col, destG, dr, dc, "b", curload);
+              fprintf(outputFile, ",%lf", curload);
             }
 #endif
+            fprintf(outputFile, "\n");
           }
           it++;
         }
@@ -622,11 +614,6 @@ inline void printStats() {
 #endif
 
   fclose(outputFile);
-#if JOB_SPECIFIC_TRAFFIC
-  for(int i = 0; i < num_jobs; i++) {
-    fclose(jobOutputFiles[i]);
-  }
-#endif
   printf("\n");
   printf("-------------------------- Summary --------------------------\n");
   printf("Bytes/link (MB) Min: %.2f Avg: %.2lf Max: %.2f\n", minLoad, totalLinkLoad/numLinks, maxLoad);
