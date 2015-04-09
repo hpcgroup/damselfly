@@ -55,7 +55,7 @@ int main(int argc, char**argv) {
     for(int i = 0; i < (numrows * numcols * numnodesperrouter * numcores); i++) {
       rankToCoords(target, dims);
       for(int j = 0; j < 5; j++) {
-	printf("%d ", dims[j]);
+	printf("%d,", dims[j]);
 	fwrite(&dims[j], sizeof(int), 1, binout);
       }
       printf("%d\n", jobid);
