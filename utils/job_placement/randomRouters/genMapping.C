@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string.h>
+#include <math.h>
 
 int numgroups, numrows, numcols, numnodesperrouter, numcores;
 
@@ -30,7 +31,7 @@ int main(int argc, char**argv) {
   int jobsize = atoi(argv[6]);
 
   int numRouters = numgroups * numrows * numcols;
-  int numAllocRouters = jobsize/(numnodesperrouter*numcores);
+  int numAllocRouters = ceil((double)(jobsize)/(double)(numnodesperrouter*numcores));
 
   int *placed = new int[numRouters];
   int *jobmap = new int[numAllocRouters];
@@ -64,8 +65,12 @@ int main(int argc, char**argv) {
   }
 
   int dims[5];
+  int totalcores = 0;
+
   for(currentRouter = 0; currentRouter < numAllocRouters; currentRouter++) {
-    target = jobmap[currentRouter]*numnodesperrouter*numcores;
+    if(totalcores == jobsize)
+      break;
+    target = jobmap[currentRouter] * numnodesperrouter * numcores;
     for(int i = 0; i < (numnodesperrouter*numcores); i++) {
       rankToCoords(target, dims);
       for(int j = 0; j < 5; j++) {
@@ -73,6 +78,10 @@ int main(int argc, char**argv) {
       }
       printf("\n");
       target++;
+
+      totalcores++;
+      if(totalcores == jobsize)
+        break;
     }
   }
 }
