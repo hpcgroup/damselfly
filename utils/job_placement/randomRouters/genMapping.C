@@ -29,39 +29,42 @@ int main(int argc, char**argv) {
   numcores = atoi(argv[5]);
   int jobsize = atoi(argv[6]);
 
-  int numRouters = numgroups*numrows*numcols;
+  int numRouters = numgroups * numrows * numcols;
+  int numAllocRouters = jobsize/(numnodesperrouter*numcores);
+
   int *placed = new int[numRouters];
-  int *jobmap = new int[jobsize/(numnodesperrouter*numcores)];
+  int *jobmap = new int[numAllocRouters];
+  memset(placed, 0, sizeof(int)*numRouters);
 
   srand(101429);
 
-  memset(placed, 0, sizeof(int)*numRouters);
   int currentRouter = 0;
-  for(int i = 0; i < 16*(jobsize/(numnodesperrouter*numcores)); i++) {
+  /* try and find as many random routers as possible in 16*numAllocNodes trials */
+  for(int i = 0; i < 16 * numAllocRouters; i++) {
     int target = rand() % numRouters;
     if(placed[target] == 0) {
       placed[target] = 1;
       jobmap[currentRouter] = target;
       currentRouter++;
-      if(currentRouter == (jobsize/(numnodesperrouter*numcores))) {
+      if(currentRouter == numAllocRouters) {
 	break;
       }
     }
   }
 
+  /* fill remaining routers in jobmap if any in order */
   int target = 0;
-  if(currentRouter != (jobsize/(numnodesperrouter*numcores))) {
-    for(; currentRouter < (jobsize/(numnodesperrouter*numcores)); currentRouter++) {
-      while(placed[target] == 1) {
-	target++;
-      }
-      placed[target] = 1;
-      jobmap[currentRouter] = target;
+  for(; currentRouter < numAllocRouters; currentRouter++) {
+    while(placed[target] == 1) {
+      target++;
     }
+    placed[target] = 1;
+    jobmap[currentRouter] = target;
+    target++;
   }
 
   int dims[5];
-  for(currentRouter = 0; currentRouter < (jobsize/(numnodesperrouter*numcores)); currentRouter++) {
+  for(currentRouter = 0; currentRouter < numAllocRouters; currentRouter++) {
     target = jobmap[currentRouter]*numnodesperrouter*numcores;
     for(int i = 0; i < (numnodesperrouter*numcores); i++) {
       rankToCoords(target, dims);
