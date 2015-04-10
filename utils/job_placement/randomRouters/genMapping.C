@@ -5,19 +5,19 @@
 int numgroups, numrows, numcols, numnodesperrouter, numcores;
 
 void rankToCoords(int rank, int *dims) {
-	dims[4] = rank % numcores;
-	rank /= numcores;
+  dims[4] = rank % numcores;
+  rank /= numcores;
 
-	dims[3] = rank % numnodesperrouter;
-	rank /= numnodesperrouter;
+  dims[3] = rank % numnodesperrouter;
+  rank /= numnodesperrouter;
 
-	dims[2] = rank % numcols;
-	rank /= numcols;
+  dims[2] = rank % numcols;
+  rank /= numcols;
 
-	dims[1] = rank % numrows;
-	rank /= numrows;
+  dims[1] = rank % numrows;
+  rank /= numrows;
 
-	dims[0] = rank % numgroups;
+  dims[0] = rank % numgroups;
 }
 
 int main(int argc, char**argv) {
@@ -38,38 +38,38 @@ int main(int argc, char**argv) {
   memset(placed, 0, sizeof(int)*numRouters);
   int currentRouter = 0;
   for(int i = 0; i < 16*(jobsize/(numnodesperrouter*numcores)); i++) {
-  	int target = rand() % numRouters;
-  	if(placed[target] == 0) {
-  		placed[target] = 1;
-  		jobmap[currentRouter] = target;
-  		currentRouter++;
-  		if(currentRouter == (jobsize/(numnodesperrouter*numcores))) {
-  			break;
-  		}
-  	}
+    int target = rand() % numRouters;
+    if(placed[target] == 0) {
+      placed[target] = 1;
+      jobmap[currentRouter] = target;
+      currentRouter++;
+      if(currentRouter == (jobsize/(numnodesperrouter*numcores))) {
+	break;
+      }
+    }
   }
 
   int target = 0;
   if(currentRouter != (jobsize/(numnodesperrouter*numcores))) {
-  	for(; currentRouter < (jobsize/(numnodesperrouter*numcores)); currentRouter++) {
-  		while(placed[target] == 1) {
-  			target++;
-  		}
-  		placed[target] = 1;
-  		jobmap[currentRouter] = target;
-  	}
+    for(; currentRouter < (jobsize/(numnodesperrouter*numcores)); currentRouter++) {
+      while(placed[target] == 1) {
+	target++;
+      }
+      placed[target] = 1;
+      jobmap[currentRouter] = target;
+    }
   }
 
   int dims[5];
   for(currentRouter = 0; currentRouter < (jobsize/(numnodesperrouter*numcores)); currentRouter++) {
-  	target = jobmap[currentRouter]*numnodesperrouter*numcores;
-  	for(int i = 0; i < (numnodesperrouter*numcores); i++) {
-  		rankToCoords(target, dims);
-  		for(int j = 0; j < 5; j++) {
-	  		printf("%d ", dims[j]);
-	  	}
-	  	printf("\n");
-	  	target++;
-  	}
+    target = jobmap[currentRouter]*numnodesperrouter*numcores;
+    for(int i = 0; i < (numnodesperrouter*numcores); i++) {
+      rankToCoords(target, dims);
+      for(int j = 0; j < 5; j++) {
+	printf("%d ", dims[j]);
+      }
+      printf("\n");
+      target++;
+    }
   }
 }
