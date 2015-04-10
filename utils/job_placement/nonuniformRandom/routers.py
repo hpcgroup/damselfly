@@ -276,11 +276,17 @@ if False:
     plt.show()
 
 print "g,r,c,n,core,jobid"
-for t,s in zip(tasks,task_sizes):
+for t in xrange(0,len(tasks)):
      x = np.where(cores == t+1)
      
-     if x[0].shape[0] != s:
-         print "Task assignment inconsistent for task ", t, ": found ", x[0].shape[0], " assigned cores but needed ", s
+     # Now find the size of the t's job
+     i = 0 
+     while tasks[i] != t:
+         i += 1
+     
+     
+     if x[0].shape[0] != task_sizes[i]:
+         print "Task assignment inconsistent for task ", t, ": found ", x[0].shape[0], " assigned cores but needed ", task_sizes[i]
          exit(0)
      #print x
      for rank in x[0]:
