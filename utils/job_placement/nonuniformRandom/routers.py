@@ -130,6 +130,8 @@ binout = open(argv[8], "wb")
 
 # Compute the system size
 router_count = groups * rows *columns
+node_count = router_count * nodes_per_router
+cores_per_router = nodes_per_router * cores_per_node
 core_count = router_count * nodes_per_router * cores_per_node
 task_sizes = [int(arg) for arg in argv[9:]]
 
@@ -158,9 +160,27 @@ cores = np.zeros(core_count)
 # List of empty router slots
 empty = list(xrange(0, router_count))
 
+# List of empty nodes
+empty_nodes = list(xrange(0,node_count))
+
+# Create scale down the task_sizes to leave some stragglers
+task_sizes_tight = list(task_sizes)
+for i,t in enumerate(task_sizes_tight):
+    # How many routers would this job fill
+    nr_rounters = t / cores_per_router
+    if nr_rounters * cores_per_router < t:
+        nr_rounters += 1
+        
+    # Pick no more than about 3% of the routers to be left out
+    task_sizes_tight[i] = (97*nr_rounters) /  100 * cores_per_router
+    
+
+#print task_sizes
+#print task_sizes_tight
+
 # For all tasks
-for t,size,dist in zip(tasks,task_sizes,task_distributions):
-    #print "Started task ", i, size
+for t,size,dist in zip(tasks,task_sizes_tight,task_distributions):
+    print "Started task ", i, size
     count = 0
     while count < size:
         
@@ -187,16 +207,47 @@ for t,size,dist in zip(tasks,task_sizes,task_distributions):
             i = 0
             while i<cores_per_node*nodes_per_router and count<size:
                 cores[elem*cores_per_node*nodes_per_router + i] = t+1
+                
                 i += 1
                 count += 1
              
             # Remove the router from the empty list
             empty.remove(elem)
             
+            # Remove the corresponding nodes (This assumine the sizes for this 
+            # loop are multiples of the core_per_router
+            for i in xrange(0,nodes_per_router):
+                empty_nodes.remove(elem*nodes_per_router + i)    
+            
             # Adjust all distributions to include another filled element
             for d in task_distributions:
                 d.fillSlot(elem)
                 
+
+
+
+
+# Now place the remaining cores of the tasks by uniformly picking
+# empty nodes
+for t,full,tight in zip(tasks,task_sizes,task_sizes_tight):
+    size = full - tight
+    
+    count = 0
+    while count < size:
+        
+        # Choose a random node
+        elem = random.choice(empty_nodes)
+
+        i = 0
+        while i<cores_per_node and count<size:
+            cores[elem*cores_per_node + i] = t+1
+                
+            i += 1
+            count += 1
+             
+            # Remove the router from the empty list
+        empty_nodes.remove(elem)
+        
 
 
 
@@ -225,8 +276,12 @@ if False:
     plt.show()
 
 print "g,r,c,n,core,jobid"
-for t in xrange(0,len(tasks)):
+for t,s in zip(tasks,task_sizes):
      x = np.where(cores == t+1)
+     
+     if x[0].shape[0] != s:
+         print "Task assignment inconsistent for task ", t, ": found ", x[0].shape[0], " assigned cores but needed ", s
+         exit(0)
      #print x
      for rank in x[0]:
         dims = rank_to_coords(rank, groups, rows, columns, nodes_per_router, cores_per_node)
