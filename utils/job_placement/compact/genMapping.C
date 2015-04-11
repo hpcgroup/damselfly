@@ -1,12 +1,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string.h>
+#include <math.h>
 #include <vector>
 
 using namespace std;
 
 int numgroups, numrows, numcols, numnodesperrouter, numcores;
 vector<int> jobSizes;
+vector<int> jobSizesNodes;
 
 void rankToCoords(int rank, int *dims) {
   dims[4] = rank % numcores;
@@ -32,27 +34,24 @@ int main(int argc, char**argv) {
   numcores = atoi(argv[5]);
   FILE *binout = fopen(argv[6], "wb");
   int numJobs = argc - 7;
-  int numAllocCores = 0;
+  int numAllocNodes = 0;
 
   jobSizes.resize(numJobs);
+  jobSizesNodes.resize(numJobs);
   for(int i=0; i<numJobs; i++) {
     jobSizes[i] = atoi(argv[i+7]);
-    numAllocCores += jobSizes[i];
-    // printf("%d ", jobSizes[i]);
+    jobSizesNodes[i] = ceil((double)jobSizes[i] / (double)numcores);
+    numAllocNodes += jobSizesNodes[i];
   }
 
   int dims[5];
-  int target = 0, coresperjob = 0, jobid = 0, totalcores = 0;
+  int target, coresperjob = 0, jobid = 0;
 
   printf("g,r,c,n,core,jobid\n");
 
-  /* currently only works for certain job sizes -- larger than a group
-   * for single jobs and non-multiples of group size for job workloads */
-  for(int currentGroup = 0; currentGroup <= (numAllocCores/(numrows * numcols * numnodesperrouter * numcores)); currentGroup++) {
-    if(totalcores == numAllocCores)
-      break;
-    target = currentGroup * numrows * numcols * numnodesperrouter * numcores;
-    for(int i = 0; i < (numrows * numcols * numnodesperrouter * numcores); i++) {
+  for(int n = 0; n < numAllocNodes; n++) {
+    for(int c = 0; c < numcores; c++) {
+      target = n * numcores + c;
       rankToCoords(target, dims);
       for(int j = 0; j < 5; j++) {
 	printf("%d,", dims[j]);
@@ -60,17 +59,13 @@ int main(int argc, char**argv) {
       }
       printf("%d\n", jobid);
       fwrite(&jobid, sizeof(int), 1, binout);
-      target++;
 
       coresperjob++;
-      totalcores++;
       if(coresperjob == jobSizes[jobid]) {
-	// printf("%d %d\n", coresperjob, jobid);
 	jobid++;
 	coresperjob = 0;
-      }
-      if(totalcores == numAllocCores)
 	break;
+      }
     }
   }
 
