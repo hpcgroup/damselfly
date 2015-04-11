@@ -404,7 +404,18 @@ int main(int argc, char**argv) {
     num_jobs++;
 
     fscanf(conffile, "%s", cur_comm_file);
-    if(strcmp(cur_comm_file, "") != 0) {
+
+    if(strcmp(cur_comm_file, "----") == 0) {
+      if(num_jobs == 0) {
+	if(myRank == 0)
+	  printf("No communication graphs specified\nExiting ...\n");
+	MPI_Barrier(MPI_COMM_WORLD);
+	MPI_Abort(MPI_COMM_WORLD, 1);
+      }
+      // ignore rest of the file
+      break;
+    }
+    else if(strcmp(cur_comm_file, "") != 0) {
       FILE *commfile = fopen(cur_comm_file, "rb");
       nulltest((void*)commfile, "communication file");
 
@@ -420,7 +431,7 @@ int main(int argc, char**argv) {
       MsgSDB newMsgSDB;
 
       if(!myRank) {
-        printf("Reading communication-graph file: %s\n", cur_comm_file);
+        printf("Reading communication graph file: %s\n", cur_comm_file);
 	printf("Number of edges: %llu\n", numMsgs);
       }
 
@@ -472,7 +483,7 @@ int main(int argc, char**argv) {
 
   gettimeofday(&endRead, NULL);
   if(!myRank)
-    calculateAndPrint(startRead, endRead, "Time for reading communication-graph file");
+    calculateAndPrint(startRead, endRead, "Time for reading communication graph file(s)");
 
 #if JOB_SPECIFIC_TRAFFIC
   jobLinkLoads.resize(num_jobs);

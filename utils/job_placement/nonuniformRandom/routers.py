@@ -180,7 +180,6 @@ for i,t in enumerate(task_sizes_tight):
 
 # For all tasks
 for t,size,dist in zip(tasks,task_sizes_tight,task_distributions):
-    print "Started task ", i, size
     count = 0
     while count < size:
         
