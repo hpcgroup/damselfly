@@ -126,7 +126,7 @@ nodes_per_router = int(argv[4])
 cores_per_node = int(argv[5])
 dist = argv[6]
 p = float(argv[7])
-binout = open(argv[8], "wb")
+fileprefix = argv[8]
 
 # Compute the system size
 router_count = groups * rows *columns
@@ -274,7 +274,13 @@ if False:
     
     plt.show()
 
-print "g,r,c,n,core,jobid"
+
+# set up text and binary files
+csvfileall = open(fileprefix + ".csv", "w")
+binfileall = open(fileprefix + ".bin", "wb")
+
+csvfileall.write("g,r,c,n,core,jobid\n")
+
 for t in xrange(0,len(tasks)):
      x = np.where(cores == t+1)
      
@@ -283,15 +289,15 @@ for t in xrange(0,len(tasks)):
      while tasks[i] != t:
          i += 1
      
-     
      if x[0].shape[0] != task_sizes[i]:
          print "Task assignment inconsistent for task ", t, ": found ", x[0].shape[0], " assigned cores but needed ", task_sizes[i]
          exit(0)
      #print x
      for rank in x[0]:
         dims = rank_to_coords(rank, groups, rows, columns, nodes_per_router, cores_per_node)
-        print "%d,%d,%d,%d,%d,%d" % (dims[0],dims[1],dims[2],dims[3],dims[4],t)
-        binout.write(struct.pack('6i', dims[0], dims[1], dims[2], dims[3], dims[4], t))
+        csvfileall.write("%d,%d,%d,%d,%d,%d\n" % (dims[0],dims[1],dims[2],dims[3],dims[4],t))
+        binfileall.write(struct.pack('6i', dims[0], dims[1], dims[2], dims[3], dims[4], t))
 
-binout.close()
+csvfileall.close()
+binfileall.close()
 
