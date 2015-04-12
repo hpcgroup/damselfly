@@ -282,21 +282,32 @@ binfileall = open(fileprefix + ".bin", "wb")
 csvfileall.write("g,r,c,n,core,jobid\n")
 
 for t in xrange(0,len(tasks)):
-     x = np.where(cores == t+1)
+    x = np.where(cores == t+1)
+
+    # Now find the size of the t's job
+    i = 0
+    while tasks[i] != t:
+        i += 1
      
-     # Now find the size of the t's job
-     i = 0 
-     while tasks[i] != t:
-         i += 1
-     
-     if x[0].shape[0] != task_sizes[i]:
-         print "Task assignment inconsistent for task ", t, ": found ", x[0].shape[0], " assigned cores but needed ", task_sizes[i]
-         exit(0)
-     #print x
-     for rank in x[0]:
+    if x[0].shape[0] != task_sizes[i]:
+        print "Task assignment inconsistent for task ", t, ": found ", x[0].shape[0], " assigned cores but needed ", task_sizes[i]
+        exit(0)
+
+    csvfile = open("%s-%d.csv" % (fileprefix, t), "w")
+    binfile = open("%s-%d.bin" % (fileprefix, t), "wb")
+
+    csvfile.write("g,r,c,n,core,jobid\n")
+
+    # print x
+    for rank in x[0]:
         dims = rank_to_coords(rank, groups, rows, columns, nodes_per_router, cores_per_node)
+        csvfile.write("%d,%d,%d,%d,%d,0\n" % (dims[0],dims[1],dims[2],dims[3],dims[4]))
         csvfileall.write("%d,%d,%d,%d,%d,%d\n" % (dims[0],dims[1],dims[2],dims[3],dims[4],t))
+        binfile.write(struct.pack('6i', dims[0], dims[1], dims[2], dims[3], dims[4], 0))
         binfileall.write(struct.pack('6i', dims[0], dims[1], dims[2], dims[3], dims[4], t))
+
+    csvfile.close()
+    binfile.close()
 
 csvfileall.close()
 binfileall.close()
