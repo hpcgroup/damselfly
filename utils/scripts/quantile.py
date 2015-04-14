@@ -24,9 +24,11 @@ import matplotlib.pyplot as pl
 if __name__ == '__main__':
   from sys import argv
 
-  (alllinks, green, black, blue)  = readfile(argv[1])
+  num_jobs = int(argv[2])
 
-  print np.percentile(alllinks, 0), np.percentile(alllinks, 25), np.percentile(alllinks, 50), np.percentile(alllinks, 75), np.percentile(alllinks, 100)
-  print np.percentile(green, 0), np.percentile(green, 25), np.percentile(green, 50), np.percentile(green, 75), np.percentile(green, 100)
-  print np.percentile(black, 0), np.percentile(black, 25), np.percentile(black, 50), np.percentile(black, 75), np.percentile(black, 100)
-  print np.percentile(blue, 0), np.percentile(blue, 25), np.percentile(blue, 50), np.percentile(blue, 75), np.percentile(blue, 100)
+  (alllinks, green, black, blue)  = readfile(argv[1], num_jobs)
+
+  print np.percentile(alllinks, 0), np.percentile(alllinks, 25), np.percentile(alllinks, 50), np.percentile(alllinks, 75), np.percentile(alllinks, 100), np.average(alllinks)
+  print np.percentile(green, 0), np.percentile(green, 25), np.percentile(green, 50), np.percentile(green, 75), np.percentile(green, 100), np.average(green)
+  print np.percentile(black, 0), np.percentile(black, 25), np.percentile(black, 50), np.percentile(black, 75), np.percentile(black, 100), np.average(black)
+  print np.percentile(blue, 0), np.percentile(blue, 25), np.percentile(blue, 50), np.percentile(blue, 75), np.percentile(blue, 100), np.average(blue)
