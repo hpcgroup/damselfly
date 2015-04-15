@@ -25,10 +25,15 @@ if __name__ == '__main__':
   from sys import argv
 
   num_jobs = int(argv[2])
+  color = argv[3]
 
   (alllinks, green, black, blue)  = readfile(argv[1], num_jobs)
 
-  print np.percentile(alllinks, 0), np.percentile(alllinks, 25), np.percentile(alllinks, 50), np.percentile(alllinks, 75), np.percentile(alllinks, 100), np.average(alllinks)
-  print np.percentile(green, 0), np.percentile(green, 25), np.percentile(green, 50), np.percentile(green, 75), np.percentile(green, 100), np.average(green)
-  print np.percentile(black, 0), np.percentile(black, 25), np.percentile(black, 50), np.percentile(black, 75), np.percentile(black, 100), np.average(black)
-  print np.percentile(blue, 0), np.percentile(blue, 25), np.percentile(blue, 50), np.percentile(blue, 75), np.percentile(blue, 100), np.average(blue)
+  if color == 'total':
+    print "%0.3f %0.3f %0.3f" % (np.percentile(alllinks, 0), np.average(alllinks), np.percentile(alllinks, 100))
+  if color == 'green':
+    print "%0.3f %0.3f %0.3f" % (np.percentile(green, 0), np.average(green), np.percentile(green, 100))
+  if color == 'black':
+    print "%0.3f %0.3f %0.3f" % (np.percentile(black, 0), np.average(black), np.percentile(black, 100))
+  if color == 'blue':
+    print "%0.3f %0.3f %0.3f" % (np.percentile(blue, 0), np.average(blue), np.percentile(blue, 100))

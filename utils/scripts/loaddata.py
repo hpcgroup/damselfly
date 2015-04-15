@@ -9,7 +9,7 @@ import numpy as np
 def readfile(filename, num_jobs):
     input = open(filename, 'r')
 
-    print num_jobs, "num_jobs"
+    # print num_jobs, "num_jobs"
     if (num_jobs == 1) :
       dtype={'names': ('sg', 'sr', 'sc',
           'dg', 'dr', 'dc',
