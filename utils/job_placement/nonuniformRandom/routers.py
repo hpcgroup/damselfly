@@ -142,7 +142,7 @@ tasks = range(0,len(task_sizes))
 np.random.shuffle(tasks)
 
 # Adjust the order of sizes
-task_sizes = [task_sizes[i-1] for i in tasks ]
+task_sizes = [task_sizes[i] for i in tasks]
 
 # Create random array of centers
 task_centers = np.random.random_integers(0,router_count-1,len(tasks))
@@ -174,9 +174,6 @@ for i,t in enumerate(task_sizes_tight):
     # Pick no more than about 3% of the routers to be left out
     task_sizes_tight[i] = (97*nr_rounters) /  100 * cores_per_router
     
-
-#print task_sizes
-#print task_sizes_tight
 
 # For all tasks
 for t,size,dist in zip(tasks,task_sizes_tight,task_distributions):
@@ -281,20 +278,20 @@ binfileall = open(fileprefix + ".bin", "wb")
 
 csvfileall.write("g,r,c,n,core,jobid\n")
 
-for t in xrange(0,len(tasks)):
-    x = np.where(cores == t+1)
+for taskid in xrange(0,len(tasks)):
+    x = np.where(cores == taskid+1)
 
     # Now find the size of the t's job
-    i = 0
-    while tasks[i] != t:
-        i += 1
-     
-    if x[0].shape[0] != task_sizes[i]:
-        print "Task assignment inconsistent for task ", t, ": found ", x[0].shape[0], " assigned cores but needed ", task_sizes[i]
+    loc = 0
+    while tasks[loc] != taskid:
+        loc += 1
+
+    if x[0].shape[0] != task_sizes[loc]:
+        print "Task assignment inconsistent for task ", taskid, ": found ", x[0].shape[0], " assigned cores but needed ", task_sizes[loc]
         exit(0)
 
-    csvfile = open("%s-%d.csv" % (fileprefix, t), "w")
-    binfile = open("%s-%d.bin" % (fileprefix, t), "wb")
+    csvfile = open("%s-%d.csv" % (fileprefix, taskid), "w")
+    binfile = open("%s-%d.bin" % (fileprefix, taskid), "wb")
 
     csvfile.write("g,r,c,n,core,jobid\n")
 
@@ -302,9 +299,9 @@ for t in xrange(0,len(tasks)):
     for rank in x[0]:
         dims = rank_to_coords(rank, groups, rows, columns, nodes_per_router, cores_per_node)
         csvfile.write("%d,%d,%d,%d,%d,0\n" % (dims[0],dims[1],dims[2],dims[3],dims[4]))
-        csvfileall.write("%d,%d,%d,%d,%d,%d\n" % (dims[0],dims[1],dims[2],dims[3],dims[4],t))
+        csvfileall.write("%d,%d,%d,%d,%d,%d\n" % (dims[0],dims[1],dims[2],dims[3],dims[4],taskid))
         binfile.write(struct.pack('6i', dims[0], dims[1], dims[2], dims[3], dims[4], 0))
-        binfileall.write(struct.pack('6i', dims[0], dims[1], dims[2], dims[3], dims[4], t))
+        binfileall.write(struct.pack('6i', dims[0], dims[1], dims[2], dims[3], dims[4], taskid))
 
     csvfile.close()
     binfile.close()
