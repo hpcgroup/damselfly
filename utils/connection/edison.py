@@ -9,6 +9,11 @@ filename = sys.argv[1]
 intracon = open(sys.argv[2], "wb")
 intercon = open(sys.argv[3], "wb")
 
+def router(group, row, col):
+    return group*96 + row*16 + col
+
+numlinks = np.zeros((1440,1440), dtype=np.int)
+
 with open(filename) as ofile:
     matches = re.findall('c\d-\dc\ds\d+a0l\d+\((\d+):(\d):(\d+)\).(\w+).->.c\d-\dc\ds\d+a0l\d+\((\d+):(\d):(\d+)\)', ofile.read(), re.MULTILINE)
 
@@ -18,7 +23,7 @@ for match in matches:
 	srcgrp = srcgrp - 1
     srcrow = int(match[1])
     srccol = int(match[2])
-    srcrouter = srcgrp*96 + srcrow*16 + srccol
+    srcrouter = router(srcgrp, srcrow, srccol)
 
     color = match[3]
 
@@ -27,26 +32,30 @@ for match in matches:
 	dstgrp = dstgrp - 1
     dstrow = int(match[5])
     dstcol = int(match[6])
-    dstrouter = dstgrp*96 + dstrow*16 + dstcol
+    dstrouter = router(dstgrp, dstrow, dstcol)
+
+    if color == 'black':
+	numlinks[srcrouter][dstrouter] += 1
 
     if srcgrp == 0:
 	if color == 'blue':
 	    # write to inter-con file
 	    intercon.write(struct.pack('2i', srcrouter, dstrouter))
-	    print 'INTER', srcrouter, dstrouter
+	    print 'BLUE', srcrouter, dstrouter
 	else:
 	    # write to intra-con file
 	    if color == 'green':
 		intracon.write(struct.pack('3i', srcrouter, dstrouter, 0))
-		print 'INTRA', srcrouter, dstrouter, 0
-	    else:
+		print 'GREEN', srcrouter, dstrouter, 0
+	    elif numlinks[srcrouter][dstrouter] < 4:
 		intracon.write(struct.pack('3i', srcrouter, dstrouter, 1))
-		print 'INTRA', srcrouter, dstrouter, 1
+		print 'BLACK', srcrouter, dstrouter, 1
     else:
 	if color == 'blue':
 	    # only write the inter-con file
 	    intercon.write(struct.pack('2i', srcrouter, dstrouter))
-	    print 'INTER', srcrouter, dstrouter
+	    print 'BLUE', srcrouter, dstrouter
 
 intracon.close()
 intercon.close()
+
