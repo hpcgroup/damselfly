@@ -26,7 +26,13 @@ if __name__ == '__main__':
 
   color = argv[1]
 
-  for filename in glob.glob('links-*.csv'):
+  filelist = sorted(glob.glob('single/*/links-*.csv'))
+  # for i in range(0,14):
+  #   temp = filelist[5*i]
+  #   filelist[5*i] = filelist[5*i+4]
+  #   filelist[5*i+4] = temp
+
+  for filename in filelist:
     (alllinks, green, black, blue) = readfile(filename)
 
     if color == 'total':
