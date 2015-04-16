@@ -462,7 +462,7 @@ int main(int argc, char**argv) {
           currentCount++;
         }
       }
-      currRankBase = cur_ranks;
+      currRankBase += cur_ranks;
       fclose(commfile);
     }
   }
