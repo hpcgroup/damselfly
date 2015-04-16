@@ -4,13 +4,25 @@ from sys import argv
 import re
 import glob
 import numpy as np
+import csv
 
 # read counter file into a numpy array
-def readfile(filename, num_jobs):
-    input = open(filename, 'r')
+def readfile(filename):
+    temp = open(filename)
+    csv_f = csv.reader(temp)
+    first = next(csv_f)
+    num_jobs = len(first) - 8
 
+    input = open(filename, 'r')
     # print num_jobs, "num_jobs"
-    if (num_jobs == 1) :
+    if (num_jobs == 0) :
+      dtype={'names': ('sg', 'sr', 'sc',
+          'dg', 'dr', 'dc',
+          'color', 'bytes'),
+        'formats': ('i4', 'i4', 'i4',
+            'i4', 'i4', 'i4',
+            'S2', 'f8')}
+    elif (num_jobs == 1) :
       dtype={'names': ('sg', 'sr', 'sc',
           'dg', 'dr', 'dc',
           'color', 'bytes',
