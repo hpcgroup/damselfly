@@ -1,8 +1,5 @@
 #!/usr/bin/env python
 
-from sys import argv
-import re
-import glob
 import numpy as np
 import csv
 
@@ -19,7 +16,7 @@ def readfile(filename, jobIndex):
       column = 'job' + str(jobIndex)
 
     input = open(filename, 'r')
-    # print num_jobs, "num_jobs"
+
     if (num_jobs == 0) :
       dtype={'names': ('sg', 'sr', 'sc',
           'dg', 'dr', 'dc',
@@ -58,7 +55,7 @@ def readfile(filename, jobIndex):
             'f8', 'f8', 'f8', 'f8')}
 
 
-    data = np.loadtxt(input, dtype=np.dtype(dtype),delimiter=",",skiprows=1)
+    data = np.loadtxt(input, dtype=np.dtype(dtype), delimiter=",", skiprows=1)
 
     alllinks = data[column]
     green = data[np.where(data['color'] == 'g')][column]
