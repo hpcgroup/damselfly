@@ -65,10 +65,10 @@ if __name__ == '__main__':
 	  for job in range(int(max_num_jobs)) :
 	      (num_jobs, alllinks, green, black, blue) = readfile(filename, job)
 
-	      file1.write("%s job%d %d %0.3f %0.3f\n" % (filename, job, np.count_nonzero(alllinks), np.sum(alllinks), np.sum(alllinks)/np.count_nonzero(alllinks)))
-	      file2.write("%s job%d %d %0.3f %0.3f\n" % (filename, job, np.count_nonzero(green), np.sum(green), np.sum(green)/np.count_nonzero(green)))
-	      file3.write("%s job%d %d %0.3f %0.3f\n" % (filename, job, np.count_nonzero(black), np.sum(black), np.sum(black)/np.count_nonzero(black)))
-	      file4.write("%s job%d %d %0.3f %0.3f\n" % (filename, job, np.count_nonzero(blue), np.sum(blue), np.sum(blue)/np.count_nonzero(blue)))
+	      file1.write("%s job%d %0.3f %0.3f %0.3f %d %0.3f %0.3f\n" % (filename, job, np.percentile(alllinks, 0), np.average(alllinks), np.percentile(alllinks, 100), np.count_nonzero(alllinks), np.sum(alllinks), np.sum(alllinks)/np.count_nonzero(alllinks)))
+	      file2.write("%s job%d %0.3f %0.3f %0.3f %d %0.3f %0.3f\n" % (filename, job, np.percentile(green, 0), np.average(green), np.percentile(green, 100), np.count_nonzero(green), np.sum(green), np.sum(green)/np.count_nonzero(green)))
+	      file3.write("%s job%d %0.3f %0.3f %0.3f %d %0.3f %0.3f\n" % (filename, job, np.percentile(black, 0), np.average(black), np.percentile(black, 100), np.count_nonzero(black), np.sum(black), np.sum(black)/np.count_nonzero(black)))
+	      file4.write("%s job%d %0.3f %0.3f %0.3f %d %0.3f %0.3f\n" % (filename, job, np.percentile(blue, 0), np.average(blue), np.percentile(blue, 100), np.count_nonzero(blue), np.sum(blue), np.sum(blue)/np.count_nonzero(blue)))
 
       count = count + 1
 
