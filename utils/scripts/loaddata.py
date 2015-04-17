@@ -7,11 +7,16 @@ import numpy as np
 import csv
 
 # read counter file into a numpy array
-def readfile(filename):
+def readfile(filename, jobIndex):
     temp = open(filename)
     csv_f = csv.reader(temp)
     first = next(csv_f)
     num_jobs = len(first) - 8
+
+    if(jobIndex == -1):
+      column = 'bytes'
+    else:
+      column = 'job' + str(jobIndex)
 
     input = open(filename, 'r')
     # print num_jobs, "num_jobs"
@@ -45,7 +50,7 @@ def readfile(filename):
           'dg', 'dr', 'dc',
           'color', 'bytes',
           'job0', 'job1', 'job2', 'job3',
-          'job4', 'job5', 'job5', 'job7'),
+          'job4', 'job5', 'job6', 'job7'),
         'formats': ('i4', 'i4', 'i4',
             'i4', 'i4', 'i4',
             'S2', 'f8',
@@ -55,10 +60,10 @@ def readfile(filename):
 
     data = np.loadtxt(input, dtype=np.dtype(dtype),delimiter=",",skiprows=1)
 
-    alllinks = data['bytes']
-    green = data[np.where(data['color'] == 'g')]['bytes']
-    black = data[np.where(data['color'] == 'k')]['bytes']
-    blue = data[np.where(data['color'] == 'b')]['bytes']
-    return (alllinks, green, black, blue)
+    alllinks = data[column]
+    green = data[np.where(data['color'] == 'g')][column]
+    black = data[np.where(data['color'] == 'k')][column]
+    blue = data[np.where(data['color'] == 'b')][column]
+    return (num_jobs, alllinks, green, black, blue)
 
 
