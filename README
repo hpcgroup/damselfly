@@ -9,7 +9,11 @@ scenarios. Hopefully, this will be cleaned up with time.
 Branch biased-only is currently active and should be closest to real machine's
 behavior.
 
-The confformat file specifies the format for the configurtion file.
+Compilation:
+1. Create a build dir and cd into it.
+2. Inside the build dir, do following:
+cmake ..
+make
 
 Run Command:
 

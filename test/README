@@ -1,0 +1,11 @@
+To run this example:
+
+1. Convert the commdata to binary format using the utils/convert.
+2. Generate sample intra- and inter-group connection file using utils/connection.
+Use the machine dimensions specified in the conffile.
+3. Run
+mpirun -np 8 ./ariesModeling conffile DOES_NOT_EXIST test_out
+
+If you want to use a job placement/mapfile, example codes are in
+utils/job_placement.
+
