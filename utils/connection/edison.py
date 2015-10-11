@@ -60,6 +60,17 @@ for match in matches:
 	    intercon.write(struct.pack('2i', srcrouter, dstrouter))
 	    print 'BLUE', srcrouter, dstrouter
 
+for i in range(0, 1440):
+    for j in range(0, 1440):
+	if(numblack[i][j] != 0):
+	    print numblack[i][j],
+
+print "\n"
+for i in range(0, 1440):
+    for j in range(0, 1440):
+	if(numblue[i][j] != 0):
+	    print numblue[i][j],
+
 intracon.close()
 intercon.close()
 
