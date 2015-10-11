@@ -1,7 +1,0 @@
-#total number of routers
-#groups #rows #columns #nodes #cores
-filename for intra group connection
-filename for inter group connection
-filename #ranks #edges
-filename #ranks #edges
-... as many files as needed
