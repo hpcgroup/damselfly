@@ -12,7 +12,8 @@ intercon = open(sys.argv[3], "wb")
 def router(group, row, col):
     return group*96 + row*16 + col
 
-numlinks = np.zeros((1440,1440), dtype=np.int)
+numblack = np.zeros((1440,1440), dtype=np.int)
+numblue = np.zeros((1440,1440), dtype=np.int)
 
 with open(filename) as ofile:
     matches = re.findall('c\d-\dc\ds\d+a0l\d+\((\d+):(\d):(\d+)\).(\w+).->.c\d-\dc\ds\d+a0l\d+\((\d+):(\d):(\d+)\)', ofile.read(), re.MULTILINE)
@@ -34,8 +35,11 @@ for match in matches:
     dstcol = int(match[6])
     dstrouter = router(dstgrp, dstrow, dstcol)
 
+    # count number of black and blue links per router pair
     if color == 'black':
-	numlinks[srcrouter][dstrouter] += 1
+	numblack[srcrouter][dstrouter] += 1
+    if color == 'blue':
+	numblue[srcrouter][dstrouter] += 1
 
     if srcgrp == 0:
 	if color == 'blue':
@@ -47,7 +51,7 @@ for match in matches:
 	    if color == 'green':
 		intracon.write(struct.pack('3i', srcrouter, dstrouter, 0))
 		print 'GREEN', srcrouter, dstrouter, 0
-	    elif numlinks[srcrouter][dstrouter] < 4:
+	    elif numblack[srcrouter][dstrouter] < 4:
 		intracon.write(struct.pack('3i', srcrouter, dstrouter, 1))
 		print 'BLACK', srcrouter, dstrouter, 1
     else:
