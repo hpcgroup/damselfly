@@ -1,15 +1,20 @@
 This code is to model ideal flow of packets on Cray's XC30.
 
-Limitation: can be run on at max 16,384 MPI ranks. The primes.h file has limited 
-number of entries. Simulated cores can be as many as desired.
+Limitation: can be run on at max 16,384 MPI ranks. The primes.h file has
+limited number of entries. Simulated cores can be as many as desired.
 
-Code is a bit messed up..different branches of the repo simulates different 
+Code is a bit messed up .. different branches of the repo simulates different
 scenarios. Hopefully, this will be cleaned up with time.
 
 Branch biased-only is currently active and should be closest to real machine's
 behavior. 
 
-The confformat file specifies the format for the configurtion file.
+Build command on Blue Gene/Q:
+
+cmake -DCMAKE_C_COMPILER=mpixlc_r -DCMAKE_CXX_COMPILER=mpixlcxx_r -DCMAKE_BUILD_TYPE=Release -DJOB_TRAFFIC=ON ..
+make
+
+The confformat file specifies the format for the configuration file.
 
 Run Command:
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.6)
-project(ariesModeling)
+project(damselfly)
 
 include_directories("${PROJECT_BINARY_DIR}")
 
@@ -18,4 +18,4 @@ configure_file (
       "${PROJECT_BINARY_DIR}/Config.h"
 )
 
-add_executable(ariesModeling src/ariesModeling.C)
+add_executable(damselfly src/ariesModeling.C)
