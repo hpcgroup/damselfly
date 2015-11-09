@@ -29,10 +29,21 @@ if __name__ == '__main__':
 	  simname = re.search('sim\d+', filename).group(0)
 	  (numjobs, alllinks, green, black, blue) = readfile(filename, -1)
 
-	  file1.write("%s %0.3f %0.3f\n" % (simname, np.average(alllinks), np.amax(alllinks)))
-	  file2.write("%s %0.3f %0.3f\n" % (simname, np.average(green), np.amax(green)))
-	  file3.write("%s %0.3f %0.3f\n" % (simname, np.average(black), np.amax(black)))
-	  file4.write("%s %0.3f %0.3f\n" % (simname, np.average(blue), np.amax(blue)))
+	  linkavg = np.zeros(3)
+	  linkmax = np.zeros(3)
+
+	  linkavg[0] = np.average(green)
+	  linkavg[1] = np.average(black)
+	  linkavg[2] = np.average(blue)
+	  linkmax[0] = np.amax(green)
+	  linkmax[1] = np.amax(black)
+	  linkmax[2] = np.amax(blue)
+	  maxindex = np.argmax(linkmax)
+
+	  file1.write("%s %0.3f %0.3f\n" % (simname, linkavg[maxindex], linkmax[maxindex]))
+	  file2.write("%s %0.3f %0.3f\n" % (simname, linkavg[0], linkmax[0]))
+	  file3.write("%s %0.3f %0.3f\n" % (simname, linkavg[1], linkmax[1]))
+	  file4.write("%s %0.3f %0.3f\n" % (simname, linkavg[2], linkmax[2]))
 
       file1.close()
       file2.close()
