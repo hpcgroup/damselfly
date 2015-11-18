@@ -5,17 +5,13 @@
 #include <cassert>
 #include <list>
 #include <vector>
+#include <map>
 #include <sys/time.h>
 #include <cfloat>
 #include <mpi.h>
+#include "Config.h"
 
-#ifndef STATIC_ROUTING
-#define STATIC_ROUTING 0
-#endif
-
-#ifndef DIRECT_ROUTING
-#define DIRECT_ROUTING 0
-#endif
+#define BIASED_ROUTING 1
 
 using namespace std;
 
@@ -28,9 +24,13 @@ using namespace std;
 #define GREEN_START 0
 #define GREEN_END 16
 #define BLACK_START GREEN_END
-#define BLACK_END 22
+#define BLACK_END 32
 #define BLUE_START BLACK_END
-#define BLUE_END 32
+#define BLUE_END 42
+
+#define GREEN 0
+#define BLACK 1
+#define BLUE 2
 
 #define GREEN_BW 5120
 #define BLACK_BW 5120
@@ -47,24 +47,31 @@ using namespace std;
 
 #define MAX(a,b) (((a)>(b))?(a):(b))
 #define MIN(a,b) (((a)<(b))?(a):(b))
+#define OLD_STATS_ON 0
 
 typedef double myreal;
 unsigned rand_seed;
 
+struct Link {
+  int offset, type;
+};
+struct bLink {
+  int offset, dest;
+};
+
+vector< map< int, vector<Link> > > intraGroupLinks;
+vector< map< int, vector<bLink> > > interGroupLinks;
+vector< vector< vector<int> > > connectionList;
+
 inline void mysrand(unsigned seed) {
-  //rand_seed = seed;
   srand(seed);
 }
 
 inline unsigned myrand () {
-   //rand_seed = A_PRIME * (rand_seed) + B_PRIME;
-   //return rand_seed;
    return rand();
 }
 
 inline unsigned myrand_r (unsigned *seed) {
-   //*seed = A_PRIME * (*seed) + B_PRIME;
-   //return *seed;
    return rand_r(seed);
 }
 
@@ -74,14 +81,12 @@ typedef struct Coords {
 } Coords;
 
 typedef struct Aries {
-  myreal linksO[32]; // 0-15 Green, 16-21 Black
-  myreal linksB[32], linksB_t[32]; //remaining link bandwidth
+  myreal linksO[BLUE_END]; // 0-15 Green, 16-21 Black
+  myreal linksB[BLUE_END], linksB_t[BLUE_END]; //remaining link bandwidth
   myreal pciSO[4], pciRO[4]; //send and recv PCI
   myreal pciSB[4], pciRB[4], pciSB_t[4], pciRB_t[4]; //remaining PCI bandwidth
   int localRank; //rank within the group
-#if !STATIC_ROUTING && !DIRECT_ROUTING
-  myreal linksSum[32]; //needed to continously get traffic
-#endif
+  myreal linksSum[BLUE_END]; //needed to continously get traffic
 } Aries;
 
 typedef struct Hop {
@@ -98,16 +103,26 @@ typedef struct Msg {
   myreal bytes; //in MB
   myreal bw; //allocated
   vector< Path > paths;
+  short dcount;
   vector< bool > expand;
   vector< myreal > loads;
   vector< myreal > allocated;
+  int jobID;
 } Msg;
 
 typedef struct MsgSDB {
   int src, dst;
   double bytes;
 } MsgSDB;
-  
+
+struct IntraGroupLink {
+  int src, dest, type;
+};
+
+struct InterGroupLink {
+  int src, dest;
+};
+
 unsigned long long numMsgs; // number of messages to be sent
 vector<Msg> msgsV; // messages left to be routed
 int numAries; // number of Aries in the system
@@ -118,16 +133,23 @@ Aries *aries; // link status of current nodes
 int ariesPerGroup;
 FILE *outputFile;
 int myRank, numRanks;
+double *linkLoads, *pciLoads;
+int round;
+int num_jobs;
+vector< double * > jobLinkLoads;
 
 //forward declaration
 void model();
 inline void addLoads();
 inline void addPathsToMsgs();
-inline void addToPath(vector< Path > & paths, Coords src, int srcNum, Coords &dst, int loc1, int loc2);
-inline void addFullPaths(vector< Path > & paths, Coords src, int srcNum, Coords &dst, int dstNum);
-inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum, Path & p, unsigned *seed = 0);
-inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum, Path &p, unsigned *seed = 0);
-inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum, Path &p, unsigned *seed = 0);
+inline void getDirectPath(Coords src, int srcNum, Coords &dst, int dstNum,
+    Path & p, unsigned *seed = 0);
+inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum,
+    Path & p, unsigned *seed = 0);
+inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum,
+    Path &p, unsigned *seed = 0);
+inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum,
+    Path &p, unsigned *seed = 0);
 inline void selectExpansionRequests(bool & expand);
 inline void markExpansionRequests();
 inline void updateMessageAndLinks();
@@ -169,12 +191,13 @@ inline void positivetest(double val, string valfor) {
   }
 }
 
-inline void calculateAndPrint(struct timeval & start, struct timeval & end, string out) {
-  double time = 0;
-  time = (end.tv_sec - start.tv_sec) * 1000;
+inline void calculateAndPrint(struct timeval & start, struct timeval & end,
+    string out) {
+  double time = 0.0;
+  time = (end.tv_sec - start.tv_sec) * 1000.0;
   time += ((end.tv_usec - start.tv_usec)/1000.0);
 
-  printf("%s : %.3lf ms\n", out.c_str(), time);
+  printf("%s: %.3lfs\n", out.c_str(), time/1000.0);
 }
 
 int main(int argc, char**argv) {
@@ -183,24 +206,24 @@ int main(int argc, char**argv) {
   MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
 
   if(argc == 1) {
-    printf("Usage: %s <conffile> <mapfile> <commfile>\n", argv[0]);
+    printf("Usage: %s <conffile> <mapfile> <outfile>\n", argv[0]);
     exit(1);
   }
 
   if(!myRank) {
-    printf("Processing command line and conffile\n");
+    printf("========== Dragonfly Network Model-based Simulator ==========\n");
+    printf("Processing configuration file: %s\n", argv[1]);
   }
 
   FILE *conffile = fopen(argv[1],"r");
   nulltest((void*)conffile, "configuration file");
 
-  FILE *mapfile = fopen(argv[2],"r");
+  FILE *mapfile = fopen(argv[2], "rb");
 
-  FILE *commfile = fopen(argv[3], "rb");
-  nulltest((void*)commfile, "communication file");
-
-  outputFile = fopen(argv[4], "w");
-  nulltest((void*)outputFile, "output file");
+  if(!myRank) {
+    outputFile = fopen(argv[3], "w");
+    nulltest((void*)outputFile, "output file");
+  }
 
   fscanf(conffile, "%d", &numAries);
   positivetest((double)numAries, "number of Aries routers");
@@ -211,12 +234,10 @@ int main(int argc, char**argv) {
   }
   ariesPerGroup = maxCoords.coords[TIER2] * maxCoords.coords[TIER3];
 
-  fscanf(conffile, "%llu", &numMsgs);
-  positivetest((double)numMsgs, "number of messages");
-
   assert(numAries == (ariesPerGroup*maxCoords.coords[TIER1]));
 
-  numPEs = numAries * maxCoords.coords[NUM_LEVELS] * maxCoords.coords[NUM_LEVELS + 1];
+  numPEs = numAries * maxCoords.coords[NUM_LEVELS] *
+           maxCoords.coords[NUM_LEVELS + 1];
 
   aries = new Aries[numAries];
   nulltest((void*)aries, "aries status array");
@@ -224,10 +245,11 @@ int main(int argc, char**argv) {
   coords = new Coords[numPEs];
   nulltest((void*)coords, "coordinates of PEs");
 
+  double t1;
   /* Read the mapping of MPI ranks to hardware nodes */
   if(mapfile == NULL) {
     if(!myRank)
-      printf("Mapfile not provided; using default mapping\n");
+      printf("Mapfile does not exist; using default mapping\n");
     for(int i = 0; i < numPEs; i++) {
       int rank = i;
       for(int j = NUM_COORDS - 1; j >= 0; j--) {
@@ -236,54 +258,216 @@ int main(int argc, char**argv) {
       }
     }
   } else {
+    if(!myRank) {
+      printf("Reading job placement file: %s\n", argv[2]);
+      t1 = MPI_Wtime();
+    }
+    int jobid;	// ignore for now
+
+    int i = 0;
+    while(fread(&coords[i], sizeof(int), 5, mapfile) != 0) {
+      fread(&jobid, sizeof(int), 1, mapfile);
+      i++;
+    }
+  }
+  if(mapfile != NULL) {
+    fclose(mapfile);
     if(!myRank)
-      printf("Reading mapfile\n");
-    for(int i = 0; i < numPEs; i++) {
-      for(int j = 0; j < NUM_COORDS; j++) {
-        fscanf(mapfile, "%d", &coords[i].coords[j]);
+      printf("Time for reading job placement file: %0.3fs\n", MPI_Wtime() - t1);
+  }
+
+  // read intra group connections, store from a router's perspective
+  // all links to the same router form a vector
+  char intraFile[256] = {0};
+  fscanf(conffile, "%s", intraFile);
+  FILE *groupFile = fopen(intraFile, "rb");
+  if(!myRank)
+    printf("Reading intra-group connectivity file: %s\n", intraFile);
+
+  {
+    vector< int > greenOffsets, blackOffsets;
+    greenOffsets.resize(ariesPerGroup, 0);
+    blackOffsets.resize(ariesPerGroup, 0);
+    intraGroupLinks.resize(ariesPerGroup);
+    IntraGroupLink newLink;
+
+    while(fread(&newLink, sizeof(IntraGroupLink), 1, groupFile) != 0) {
+      Link tmpLink;
+      tmpLink.type = newLink.type;
+      if(tmpLink.type == GREEN) {
+        tmpLink.offset = greenOffsets[newLink.src]++;
+      } else {
+        tmpLink.offset = BLACK_START + blackOffsets[newLink.src]++;
+      }
+      intraGroupLinks[newLink.src][newLink.dest].push_back(tmpLink);
+    }
+  }
+
+  fclose(groupFile);
+
+  // read inter group connections, store from a router's perspective
+  // also create a group level table that tells all the connecting routers
+  char interFile[256] = {0};
+  fscanf(conffile, "%s", interFile);
+  FILE *systemFile = fopen(interFile, "rb");
+  if(!myRank)
+    printf("Reading inter-group connectivity file: %s\n", interFile);
+
+  {
+    vector< int > blueOffsets;
+    blueOffsets.resize(numAries, 0);
+    interGroupLinks.resize(numAries);
+    connectionList.resize(maxCoords.coords[0]);
+    for(int g = 0; g < connectionList.size(); g++) {
+      connectionList[g].resize(maxCoords.coords[0]);
+    }
+    InterGroupLink newLink;
+
+    while(fread(&newLink, sizeof(InterGroupLink), 1, systemFile) != 0) {
+      bLink tmpLink;
+      tmpLink.dest = newLink.dest;
+      int srcG = newLink.src / ariesPerGroup;
+      int destG = newLink.dest / ariesPerGroup;
+      tmpLink.offset = BLUE_START + blueOffsets[newLink.src]++;
+      interGroupLinks[newLink.src][destG].push_back(tmpLink);
+      int r;
+      for(r = 0; r < connectionList[srcG][destG].size(); r++) {
+        if(connectionList[srcG][destG][r] == newLink.src) break;
+      }
+      if(r == connectionList[srcG][destG].size()) {
+        connectionList[srcG][destG].push_back(newLink.src);
       }
     }
   }
 
+  fclose(systemFile);
+
+#if DUMP_CONNECTIONS
+  printf("Dumping intra-group connections\n");
+  for(int a = 0; a < intraGroupLinks.size(); a++) {
+    printf("Connections for router %d\n", a);
+    map< int, vector<Link> >  &curMap = intraGroupLinks[a];
+    map< int, vector<Link> >::iterator it = curMap.begin();
+    for(; it != curMap.end(); it++) {
+      printf(" ( %d - ", it->first);
+      for(int l = 0; l < it->second.size(); l++) {
+        printf("%d,%d ", it->second[l].offset, it->second[l].type);
+      }
+      printf(")");
+    }
+    printf("\n");
+  }
+#endif
+#if DUMP_CONNECTIONS
+  printf("Dumping inter-group connections\n");
+  for(int a = 0; a < interGroupLinks.size(); a++) {
+    printf("Connections for router %d\n", a);
+    map< int, vector<Link> >  &curMap = interGroupLinks[a];
+    map< int, vector<Link> >::iterator it = curMap.begin();
+    for(; it != curMap.end(); it++) {
+      printf(" ( %d - ", it->first);
+      for(int l = 0; l < it->second.size(); l++) {
+        printf("%d,%d ", it->second[l].offset, it->second[l].dest);
+      }
+      printf(")");
+    }
+    printf("\n");
+  }
+#endif
+
+#if DUMP_CONNECTIONS
+  printf("Dumping source aries for global connections\n");
+  for(int g = 0; g < maxCoords.coords[0]; g++) {
+    for(int g1 = 0; g1 < maxCoords.coords[0]; g1++) {
+      printf(" ( ");
+      for(int l = 0; l < connectionList[g][g1].size(); l++) {
+        printf("%d ", connectionList[g][g1][l]);
+      }
+      printf(")");
+    }
+    printf("\n");
+  }
+#endif
+
   double sum = 0;
+  myreal MB = 1024 * 1024;
+  int currRankBase = 0;
 
   /* Read the communication graph which is in edge-list format */
-  if(!myRank)
-    printf("Reading messages\n");
-  myreal MB = 1024 * 1024;
   struct timeval startRead, endRead;
   gettimeofday(&startRead, NULL);
-  unsigned long long begin = (myRank*numMsgs)/numRanks;
-  unsigned long long end = ((myRank+1)*numMsgs)/numRanks;
-  unsigned long long currentCount = begin;
 
-  fseek(commfile, begin*16, SEEK_SET);
-  MsgSDB newMsgSDB;
+  num_jobs = -1;
+  while(!feof(conffile)) {
+    char cur_comm_file[256] = {0};
+    int cur_ranks;
+    num_jobs++;
 
-  while(!feof(commfile)) {
-    Msg newmsg;
-    fread(&newMsgSDB, sizeof(MsgSDB), 1, commfile);
-    newmsg.src = newMsgSDB.src;
-    newmsg.dst = newMsgSDB.dst;
-    newmsg.bytes = newMsgSDB.bytes;
-    if(currentCount >= end) break;
-    Coords& src = coords[newmsg.src];
-    Coords& dst = coords[newmsg.dst];
-    if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]
-      && src.coords[TIER3] == dst.coords[TIER3]) {
-      currentCount++;
-      continue;
+    fscanf(conffile, "%s", cur_comm_file);
+
+    if(strcmp(cur_comm_file, "----") == 0) {
+      if(num_jobs == 0) {
+	if(myRank == 0)
+	  printf("No communication graphs specified\nExiting ...\n");
+	MPI_Barrier(MPI_COMM_WORLD);
+	MPI_Abort(MPI_COMM_WORLD, 1);
+      }
+      // ignore rest of the file
+      break;
     }
-    newmsg.bytes /= MB;
-    newmsg.srcPCI = coords[newmsg.src].coords[NUM_LEVELS];
-    newmsg.dstPCI = coords[newmsg.dst].coords[NUM_LEVELS];
-    coordstoAriesRank(newmsg.src, coords[newmsg.src]);
-    coordstoAriesRank(newmsg.dst, coords[newmsg.dst]);
-    newmsg.bw = 0;
-    msgsV.push_back(newmsg);
-    sum += newmsg.bytes;
-    currentCount++;
+    else if(strcmp(cur_comm_file, "") != 0) {
+      FILE *commfile = fopen(cur_comm_file, "rb");
+      nulltest((void*)commfile, "communication file");
+
+      fscanf(conffile, "%d", &cur_ranks);
+      positivetest((double)cur_ranks, "number of ranks");
+      fscanf(conffile, "%llu", &numMsgs);
+      positivetest((double)numMsgs, "number of messages");
+
+      unsigned long long begin = (myRank*numMsgs)/numRanks;
+      unsigned long long end = ((myRank+1)*numMsgs)/numRanks;
+      unsigned long long currentCount = begin;
+      fseek(commfile, begin*16, SEEK_SET);
+      MsgSDB newMsgSDB;
+
+      if(!myRank) {
+        printf("Reading communication graph file: %s\n", cur_comm_file);
+	printf("Number of edges: %llu\n", numMsgs);
+      }
+
+      while(!feof(commfile)) {
+        Msg newmsg;
+        if(fread(&newMsgSDB, sizeof(MsgSDB), 1, commfile) != 0) {
+          newmsg.src = newMsgSDB.src + currRankBase;
+          newmsg.dst = newMsgSDB.dst + currRankBase;
+          newmsg.bytes = newMsgSDB.bytes;
+          if(currentCount >= end) break;
+          Coords& src = coords[newmsg.src];
+          Coords& dst = coords[newmsg.dst];
+          if(src.coords[TIER1] == dst.coords[TIER1]
+              && src.coords[TIER2] == dst.coords[TIER2]
+              && src.coords[TIER3] == dst.coords[TIER3]) {
+            currentCount++;
+            continue;
+          }
+          newmsg.bytes /= MB;
+          newmsg.srcPCI = coords[newmsg.src].coords[NUM_LEVELS];
+          newmsg.dstPCI = coords[newmsg.dst].coords[NUM_LEVELS];
+          coordstoAriesRank(newmsg.src, coords[newmsg.src]);
+          coordstoAriesRank(newmsg.dst, coords[newmsg.dst]);
+          newmsg.bw = 0;
+          newmsg.jobID = num_jobs;
+          msgsV.push_back(newmsg);
+          sum += newmsg.bytes;
+          currentCount++;
+        }
+      }
+      currRankBase += cur_ranks;
+      fclose(commfile);
+    }
   }
+  fclose(conffile);
+
   numMsgs = msgsV.size();
 
   //reuse coords for default
@@ -299,14 +483,26 @@ int main(int argc, char**argv) {
 
   gettimeofday(&endRead, NULL);
   if(!myRank)
-    calculateAndPrint(startRead, endRead, "time to read communication pattern");
+    calculateAndPrint(startRead, endRead, "Time for reading communication graph file(s)");
+
+#if JOB_SPECIFIC_TRAFFIC
+  jobLinkLoads.resize(num_jobs);
+  for(int i = 0; i < num_jobs; i++) {
+    jobLinkLoads[i] = new double[numAries * BLUE_END];
+    memset(jobLinkLoads[i], 0, numAries * BLUE_END * sizeof(double));
+  }
+#endif
+
 
   if(!myRank) {
-    printf("Modeling for following system will be performed:\n");
-    printf("numlevels: %d, dims: %d %d %d %d %d\n", NUM_LEVELS, maxCoords.coords[0], maxCoords.coords[1], maxCoords.coords[2], maxCoords.coords[3], maxCoords.coords[4]);
-    printf("numAries: %d, numPEs: %d, numMsgs: %d, total volume: %.0lf MB\n", numAries, numPEs, numMsgs, sum);
+    printf("\n");
+    printf("--------------- Network configuration details ---------------\n");
+    printf("#Groups: %d #Rows: %d #Columns: %d #Nodes: %d #Cores: %d\n",
+           maxCoords.coords[0], maxCoords.coords[1], maxCoords.coords[2],
+           maxCoords.coords[3], maxCoords.coords[4]);
+    printf("Total #Routers: %d, #Cores: %d\n\n", numAries, numPEs);
 
-    printf("Starting modeling \n");
+    printf("---------------------- Start modeling -----------------------\n");
   }
 
   struct timeval startModel, endModel;
@@ -314,13 +510,10 @@ int main(int argc, char**argv) {
   model();
   gettimeofday(&endModel, NULL);
   if(!myRank) {
-    calculateAndPrint(startModel, endModel, "time to model");
+    calculateAndPrint(startModel, endModel, "Time for modeling");
+    printf("==================== Simulation complete ====================\n");
   }
 
-  fclose(conffile);
-  if(mapfile != NULL)
-    fclose(mapfile);
-  fclose(commfile);
   MPI_Barrier(MPI_COMM_WORLD);
   MPI_Finalize();
   delete[] aries;
@@ -332,6 +525,7 @@ inline void printStats() {
   myreal maxLoad = 0, minLoad = FLT_MAX;
   double totalLinkLoad = 0;
   unsigned long long linkCount = 0;
+#if OLD_STATS_ON
   for(int i = 0; i < numAries; i++) {
     for(int j = 0; j < BLUE_END; j++) {
       fprintf(outputFile, "%llu %lf\n", linkCount++, aries[i].linksO[j]);
@@ -340,293 +534,114 @@ inline void printStats() {
       totalLinkLoad += aries[i].linksO[j];
     }
   }
+  long long numLinks = numAries*(15+5+((numAries/ariesPerGroup) +
+                         (numAries % ariesPerGroup) ? 1 : 0));
+
+#else
+  //dump intragroup links first
+  int router = 0;
+  long long numLinks = 0;
+
+  fprintf(outputFile, "sg,sr,sc,dg,dr,dc,color,bytes");
+#if JOB_SPECIFIC_TRAFFIC
+  for(int job = 0; job < num_jobs; job++) {
+    fprintf(outputFile, ",job%d",job);
+  }
+#endif
+  fprintf(outputFile, "\n");
+
+  for(int row = 0; row < maxCoords.coords[TIER2]; row++) {
+    for(int col = 0; col < maxCoords.coords[TIER3]; col++) {
+      map< int, vector<Link> >::iterator it = intraGroupLinks[router].begin();
+      while(it != intraGroupLinks[router].end()) {
+        for(int l = 0; l < it->second.size(); l++) {
+          int dr = it->first / maxCoords.coords[TIER3];
+          int dc = it->first % maxCoords.coords[TIER3];
+          int linkOff = it->second[l].offset;
+          string linkType;
+          if(it->second[l].type == GREEN) {
+            linkType = "g";
+          } else {
+            linkType = "k";
+          }
+          int groupBase = 0;
+          for(int group = 0; group < maxCoords.coords[TIER1]; group++,
+              groupBase += ariesPerGroup) {
+            double curload = aries[groupBase + router].linksO[linkOff];
+            maxLoad = MAX(maxLoad, curload);
+            minLoad = MIN(minLoad, curload);
+            totalLinkLoad += curload;
+            numLinks++;
+            fprintf(outputFile, "%d,%d,%d,%d,%d,%d,%s,%lf", group, row, col,
+                group, dr, dc, linkType.c_str(), curload);
+#if JOB_SPECIFIC_TRAFFIC
+            int link_off = (groupBase + router) * BLUE_END + linkOff;
+            for(int job = 0; job < num_jobs; job++) {
+              double curload = jobLinkLoads[job][link_off];
+              fprintf(outputFile, ",%lf", curload);
+            }
+#endif
+            fprintf(outputFile, "\n");
+          }
+        }
+        it++;
+      }
+      router++;
+    }
+  }
+  router = 0;
+  for(int group = 0; group < maxCoords.coords[TIER1]; group++) {
+    for(int row = 0; row < maxCoords.coords[TIER2]; row++) {
+      for(int col = 0; col < maxCoords.coords[TIER3]; col++, router++) {
+        map< int, vector<bLink> >::iterator it = interGroupLinks[router].begin();
+        while(it != interGroupLinks[router].end()) {
+          int destG = it->first;
+          for(int l = 0; l < it->second.size(); l++) {
+            assert(destG == it->second[l].dest/ariesPerGroup);
+            int dr = (it->second[l].dest % ariesPerGroup) /
+              maxCoords.coords[TIER3];
+            int dc = it->second[l].dest % maxCoords.coords[TIER3];
+            double curload = aries[router].linksO[it->second[l].offset];
+            maxLoad = MAX(maxLoad, curload);
+            minLoad = MIN(minLoad, curload);
+            totalLinkLoad += curload;
+            numLinks++;
+            fprintf(outputFile, "%d,%d,%d,%d,%d,%d,%s,%lf", group, row, col,
+                destG, dr, dc, "b", curload);
+#if JOB_SPECIFIC_TRAFFIC
+            int link_off = router * BLUE_END + it->second[l].offset;
+            for(int job = 0; job < num_jobs; job++) {
+              double curload = jobLinkLoads[job][link_off];
+              fprintf(outputFile, ",%lf", curload);
+            }
+#endif
+            fprintf(outputFile, "\n");
+          }
+          it++;
+        }
+      }
+    }
+  }
+#endif
 
   fclose(outputFile);
-
-  long long totalLinks = numAries*(15+5+((numAries/ariesPerGroup) + (numAries % ariesPerGroup) ? 1 : 0));
-
-  printf("******************Summary*****************\n");
-  printf("STATIC_ROUTING %d DIRECT_ROUTING %d\n",STATIC_ROUTING,DIRECT_ROUTING);
-  printf("maxLoad %.2f MB -- minLoad %.2f MB\n",maxLoad,minLoad);
-  printf("averageLinkLoad %.2lf MB \n", totalLinkLoad/totalLinks);
+  printf("\n");
+  printf("-------------------------- Summary --------------------------\n");
+  printf("Bytes/link (MB) Min: %.2f Avg: %.2lf Max: %.2f\n", minLoad, totalLinkLoad/numLinks, maxLoad);
 }
 
-#if STATIC_ROUTING
-/* for static routing, the linksO and pci(S/R)O stores the volumne of traffic that passes
-through them in MB; linksB and pci(S/R)B stores the total bandwidth in MB */
-void model() {
-  memset(aries, 0, numAries*sizeof(Aries));
-  //initialize upper bounds
-  for(int i = 0; i < numAries; i++) {
-    aries[i].localRank = coords[i].coords[TIER2] * maxCoords.coords[TIER3] + coords[i].coords[TIER3];
-    for(int j = 0; j < BLUE_END; j++) {
-      if(j < GREEN_END) aries[i].linksB[j] = GREEN_BW;
-      else if(j < BLACK_END) aries[i].linksB[j] = BLACK_BW;
-      else aries[i].linksB[j] = BLUE_BW;
-    }
-    for(int j = 0; j < 4; j++) {
-      aries[i].pciSB[j] = PCI_BW;
-      aries[i].pciRB[j] = PCI_BW;
-    }
-  }
-
-  //get initial counts
-  addLoads();
-  printStats();
-}
-
-#if DIRECT_ROUTING
-
-inline void addLoads() {
-  addPathsToMsgs();
-  for(vector<Msg>::iterator msgit = msgsV.begin(); msgit != msgsV.end(); msgit++) {
-    Msg &currmsg = *msgit;
-    myreal perPath = currmsg.bytes/currmsg.paths.size();
-    for(size_t i = 0; i < currmsg.paths.size(); i++) {
-      for(size_t j = 0; j < currmsg.paths[i].size(); j++) {
-        aries[currmsg.paths[i][j].aries].linksO[currmsg.paths[i][j].link] += perPath;
-      }
-    }
-  }
-
-  double *loads = new double[numAries*BLUE_END];
-  memset(loads, 0, sizeof(double)*numAries*BLUE_END);
-  unsigned long long linkCount = 0;
-  for(int i = 0; i < numAries; i++) {
-    for(int j = 0; j < BLUE_END; j++) {
-      loads[linkCount++] = aries[i].linksO[j];
-    }
-  }
-
-  double *sumLoads;
-  if(!myRank) {
-    sumLoads = new double[numAries*BLUE_END];
-    memset(sumLoads, 0, sizeof(double)*numAries*BLUE_END);
-  }
-
-  MPI_Reduce(loads, sumLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-  delete[] loads;
-
-  if(!myRank) {
-    linkCount = 0;
-    for(int i = 0; i < numAries; i++) {
-      for(int j = 0; j < BLUE_END; j++) {
-        aries[i].linksO[j] = sumLoads[linkCount++];
-      }
-    }
-    delete [] sumLoads;
-  } else {
-    MPI_Barrier(MPI_COMM_WORLD);
-    MPI_Finalize();
-    exit(0);
+inline void getDirectPath(Coords src, int srcNum, Coords &dst, int dstNum,
+    Path & p, unsigned *seed) {
+  //same group
+  if(src.coords[TIER1] == dst.coords[TIER1]) {
+    addIntraPath(src, srcNum, dst, dstNum, p, seed);
+  } else { //different groups
+    addInterPath(src, srcNum, dst, dstNum, p, seed);
   }
 }
 
-inline void addPathsToMsgs() {
-  for(vector<Msg>::iterator msgit = msgsV.begin(); msgit != msgsV.end(); msgit++ ) {
-    Msg &currmsg = *msgit;
-    Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
-
-    //in the same lowest tier - direct connection
-    if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]) {
-      currmsg.paths.resize(1);
-      currmsg.paths[0].resize(1);
-      currmsg.paths[0][0].aries = currmsg.src;
-      currmsg.paths[0][0].link = dst.coords[TIER3]; //GREEN
-    } else if(src.coords[TIER1] == dst.coords[TIER1]) {  //in the same second tier
-      if(src.coords[TIER3] == dst.coords[TIER3]) { //aligned on tier3 - direct connection
-        currmsg.paths.resize(1);
-        currmsg.paths[0].resize(1);
-        currmsg.paths[0][0].aries = currmsg.src;
-        currmsg.paths[0][0].link = BLACK_START + dst.coords[TIER2];
-      } else { // else two paths of length 2
-        currmsg.paths.resize(2);
-        addToPath(currmsg.paths, src, currmsg.src, dst, 0, 1);
-      }
-    } else {
-      addFullPaths(currmsg.paths, src, currmsg.src, dst, currmsg.dst);
-    };
-  }
-}
-
-void addToPath(vector< Path > & paths, Coords src, int srcNum, Coords &dst, int loc1, int loc2) {
-  int interAries;
-  Hop h;
-  //first travel TIER3, then TIER2
-  h.aries = srcNum;
-  h.link = dst.coords[TIER3]; //GREEN
-  paths[loc1].push_back(h);
-  int back3 = src.coords[TIER3];
-  src.coords[TIER3] = dst.coords[TIER3];
-  coordstoAriesRank(interAries, src);
-  h.aries = interAries;
-  h.link = BLACK_START + dst.coords[TIER2];
-  paths[loc1].push_back(h);
-
-  //first travel TIER2, then TIER3
-  h.aries = srcNum;
-  h.link = BLACK_START + dst.coords[TIER2];
-  paths[loc2].push_back(h);
-  src.coords[TIER3] = back3;
-  src.coords[TIER2] = dst.coords[TIER2];
-  coordstoAriesRank(interAries, src);
-  h.aries = interAries;
-  h.link = dst.coords[TIER3];
-  paths[loc2].push_back(h);
-}
-
-void addFullPaths(vector< Path > & paths, Coords src, int srcNum, Coords &dst, int dstNum) {
-  int pathCount;
-  int localConnection = dst.coords[TIER1] % ariesPerGroup;
-  //find total number of paths
-  if(localConnection/maxCoords.coords[TIER3] == src.coords[TIER2] || localConnection % maxCoords.coords[TIER3] == src.coords[TIER3]) { //in same TIER2 or aligned on TIER3
-    pathCount = 1;
-  } else {
-    pathCount = 2;
-  }
-  int remoteConnection = src.coords[TIER1] % ariesPerGroup;
-  if(pathCount == 1 && !(remoteConnection/maxCoords.coords[TIER3] == dst.coords[TIER2] || remoteConnection % maxCoords.coords[TIER3] == dst.coords[TIER3])) {
-    pathCount = 2;
-  }
-
-  paths.resize(pathCount);
-  Coords interNode;
-  int interNum;
-  //add hops within the src group
-  if(localConnection == aries[srcNum].localRank) { //src connects to destination group
-    interNode = src;
-    interNum = srcNum;
-  } else {
-    interNode.coords[TIER1] = src.coords[TIER1];
-    interNode.coords[TIER2] = localConnection/maxCoords.coords[TIER3];
-    interNode.coords[TIER3] = localConnection % maxCoords.coords[TIER3];
-    coordstoAriesRank(interNum, interNode);
-    if(interNode.coords[TIER2] == src.coords[TIER2]) { //if use only 1 GREEN link
-      Hop h;
-      h.aries = srcNum;
-      h.link = interNode.coords[TIER3];
-      for(int i = 0; i < pathCount; i++) {
-        paths[i].push_back(h);
-      }
-    } else if(interNode.coords[TIER3] == src.coords[TIER3]) { //if use only 1 BLACK link
-      Hop h;
-      h.aries = srcNum;
-      h.link = BLACK_START + interNode.coords[TIER2];
-      for(int i = 0; i < pathCount; i++) {
-        paths[i].push_back(h);
-      }
-    } else {
-      addToPath(paths, src, srcNum, interNode, 0, 1);
-    }
-  }
-
-  //add a BLUE connection to all paths
-  Hop h;
-  h.aries = interNum;
-  h.link = BLUE_START + dst.coords[TIER1]/ariesPerGroup;
-  for(int i = 0; i < pathCount; i++) {
-    paths[i].push_back(h);
-  }
-
-  //add hops within the dst group
-  if(remoteConnection != aries[dstNum].localRank) {
-    interNode.coords[TIER1] = dst.coords[TIER1];
-    interNode.coords[TIER2] = remoteConnection/maxCoords.coords[TIER3];
-    interNode.coords[TIER3] = remoteConnection % maxCoords.coords[TIER3];
-    coordstoAriesRank(interNum, interNode);
-    if(interNode.coords[TIER2] == dst.coords[TIER2]) { //if use only 1 GREEN LINK
-      Hop h;
-      h.aries = interNum;
-      h.link = dst.coords[TIER3];
-      for(int i = 0; i < pathCount; i++) {
-        paths[i].push_back(h);
-      }
-    } else if(interNode.coords[TIER3] == dst.coords[TIER3]) { //if use only 1 BLACK link
-      Hop h;
-      h.aries = interNum;
-      h.link = BLACK_START + dst.coords[TIER2];
-      for(int i = 0; i < pathCount; i++) {
-        paths[i].push_back(h);
-      }
-    } else {
-      addToPath(paths, interNode, interNum, dst, 0, 1);
-    }
-  }
-}
-#else // not using DIRECT_ROUTING
-
-inline void addLoads() {
-  myreal MB = 1024*1024;
-  myreal perPacket = PACKET_SIZE/MB;
-  int count = 0;
-  unsigned lseed = primes[myRank];
-
-  mysrand(lseed);
-
-  if(!myRank)
-    printf("Number of MPI ranks %d\n",numRanks);
-
-  unsigned long long totalMsg = msgsV.size();
-  unsigned long long printFreq = totalMsg/10;
-
-  for(unsigned long long m = 0; m < totalMsg; m++) {
-    if(!myRank) {
-      if(m % printFreq == 0) {
-        printf("Processing %llu\n", m);
-      }
-    }
-    Msg &currmsg = msgsV[m];
-    Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
-
-    int numPackets = currmsg.bytes/perPacket;
-    numPackets = MAX(1, numPackets);
-
-    Path p;
-    for(int i = 0; i < numPackets; i++) {
-      p.clear();
-      getRandomPath(src, currmsg.src, dst, currmsg.dst, p, &lseed);
-      for(int j = 0; j < p.size(); j++) {
-        aries[p[j].aries].linksO[p[j].link] += perPacket;
-      }
-    }
-  }
-
-  double *loads = new double[numAries*BLUE_END];
-  memset(loads, 0, sizeof(double)*numAries*BLUE_END);
-  unsigned long long linkCount = 0;
-  for(int i = 0; i < numAries; i++) {
-    for(int j = 0; j < BLUE_END; j++) {
-      loads[linkCount++] = aries[i].linksO[j];
-    }
-  }
-
-  double *sumLoads;
-  if(!myRank) {
-    sumLoads = new double[numAries*BLUE_END];
-    memset(sumLoads, 0, sizeof(double)*numAries*BLUE_END);
-  }
-
-  MPI_Reduce(loads, sumLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-  delete[] loads;
-
-  if(!myRank) {
-    linkCount = 0;
-    for(int i = 0; i < numAries; i++) {
-      for(int j = 0; j < BLUE_END; j++) {
-        aries[i].linksO[j] = sumLoads[linkCount++];
-      }
-    }
-    delete [] sumLoads;
-  } else {
-    MPI_Barrier(MPI_COMM_WORLD);
-    MPI_Finalize();
-    exit(0);
-  }
-}
-#endif // not using DIRECT_ROUTING
-#endif // STATIC_ROUTING
-
-inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum, Path & p, unsigned *seed) {
+inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum,
+    Path & p, unsigned *seed) {
   //same group
   if(src.coords[TIER1] == dst.coords[TIER1]) {
     int valiantNum = myrand() % ariesPerGroup;
@@ -673,432 +688,116 @@ inline void getRandomPath(Coords src, int srcNum, Coords &dst, int dstNum, Path 
   }
 }
 
-inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum, Path &p, unsigned *seed) {
+inline void addIntraPath(Coords & src, int srcNum, Coords &dst, int dstNum,
+    Path &p, unsigned *seed) {
   Hop h;
-  if(src.coords[TIER2] == dst.coords[TIER2]) { //if use 1 GREEN
+  int usedInter = 0;
+  if(src.coords[TIER2] == dst.coords[TIER2] ||
+     src.coords[TIER3] == dst.coords[TIER3]) { //if use just 1 link
     h.aries = srcNum;
-    h.link = dst.coords[TIER3];
-    p.push_back(h);
-  } else if (src.coords[TIER3] == dst.coords[TIER3]) { //if use 1 BLACK
-    h.aries = srcNum;
-    h.link = BLACK_START + dst.coords[TIER2];
+    vector< Link > & intraLinks =
+      intraGroupLinks[aries[srcNum].localRank][aries[dstNum].localRank];
+    if(intraLinks.size() > 1) {
+      usedInter = myrand() % intraLinks.size();
+    }
+    h.link = intraLinks[usedInter].offset;
     p.push_back(h);
   } else { //two paths, choose 1
-    if(myrand() % 2) { //first GREEN, then BLACK
+    Coords gNeighbor, bNeighbor;
+    int gRank, bRank;
+    gNeighbor = bNeighbor = src;
+    gNeighbor.coords[TIER3] = dst.coords[TIER3];
+    bNeighbor.coords[TIER2] = dst.coords[TIER2];
+    coordstoAriesRank(gRank, gNeighbor);
+    coordstoAriesRank(bRank, bNeighbor);
+    vector< Link > & gLinks =
+      intraGroupLinks[aries[srcNum].localRank][aries[gRank].localRank];
+    vector< Link > & bLinks =
+      intraGroupLinks[aries[srcNum].localRank][aries[bRank].localRank];
+    int totalPaths = gLinks.size() + bLinks.size();
+
+    if((myrand() % totalPaths) < gLinks.size()) { //first GREEN, then BLACK
       h.aries = srcNum;
-      h.link = dst.coords[TIER3];
+      if(gLinks.size() > 1) {
+        usedInter = myrand() % gLinks.size();
+      }
+      h.link = gLinks[usedInter].offset;
       p.push_back(h);
-      src.coords[TIER3] = dst.coords[TIER3];
-      coordstoAriesRank(srcNum, src);
-      h.aries = srcNum;
-      h.link = BLACK_START + dst.coords[TIER2];
+      h.aries = gRank;
+      vector< Link > & gbLinks =
+        intraGroupLinks[aries[gRank].localRank][aries[dstNum].localRank];
+      if(gbLinks.size() > 1) {
+        usedInter = myrand() % gbLinks.size();
+      } else {
+        usedInter = 0;
+      }
+      h.link = gbLinks[usedInter].offset;
       p.push_back(h);
     } else { //first BLACK, then GREEN
       h.aries = srcNum;
-      h.link = BLACK_START + dst.coords[TIER2];
+      if(bLinks.size() > 1) {
+        usedInter = myrand() % bLinks.size();
+      }
+      h.link = bLinks[usedInter].offset;
       p.push_back(h);
-      src.coords[TIER2] = dst.coords[TIER2];
-      coordstoAriesRank(srcNum, src);
-      h.aries = srcNum;
-      h.link = dst.coords[TIER3];
+      h.aries = bRank;
+      vector< Link > & bgLinks =
+        intraGroupLinks[aries[bRank].localRank][aries[dstNum].localRank];
+      if(bgLinks.size() > 1) {
+        usedInter = myrand() % bgLinks.size();
+      } else {
+        usedInter = 0;
+      }
+      h.link = bgLinks[usedInter].offset;
       p.push_back(h);
     }
   }
 }
 
-inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum, Path &p, unsigned * seed) {
+inline void addInterPath(Coords & src, int srcNum, Coords &dst, int dstNum,
+    Path &p, unsigned * seed) {
     Coords interNode;
-    int interNum;
+    int usedInter = 0, interNum;
+    int dstG = dst.coords[TIER1];
 
-    int localConnection = dst.coords[TIER1] % ariesPerGroup;
-    if(localConnection == aries[srcNum].localRank) {
+    vector< int > & intNodes =
+      connectionList[src.coords[TIER1]][dstG];
+    if(intNodes.size() > 1) {
+      usedInter = myrand() % intNodes.size();
+    }
+    usedInter = intNodes[usedInter];
+    if(usedInter == srcNum) {
       interNode = src;
       interNum = srcNum;
     } else {
-      interNode.coords[TIER1] = src.coords[TIER1];
-      interNode.coords[TIER2] = localConnection / maxCoords.coords[TIER3];
-      interNode.coords[TIER3] = localConnection % maxCoords.coords[TIER3];
+      assert(src.coords[TIER1] == coords[usedInter].coords[TIER1]);
+      interNode.coords[TIER1] = coords[usedInter].coords[TIER1];
+      interNode.coords[TIER2] = coords[usedInter].coords[TIER2];
+      interNode.coords[TIER3] = coords[usedInter].coords[TIER3];
       coordstoAriesRank(interNum, interNode);
+      assert(interNum == usedInter);
       addIntraPath(src, srcNum, interNode, interNum, p, seed);
     }
 
     //BLUE link
     Hop h;
     h.aries = interNum;
-    h.link = BLUE_START + dst.coords[TIER1]/ariesPerGroup;
+    vector< bLink > & interConnections = interGroupLinks[interNum][dstG];
+    usedInter = myrand() % interConnections.size();
+    h.link = interConnections[usedInter].offset;
+    usedInter = interConnections[usedInter].dest;
     p.push_back(h);
 
-    localConnection = src.coords[TIER1] % ariesPerGroup;
-    if(localConnection != aries[dstNum].localRank) {
-      interNode.coords[TIER1] = dst.coords[TIER1];
-      interNode.coords[TIER2] = localConnection / maxCoords.coords[TIER3];
-      interNode.coords[TIER3] = localConnection % maxCoords.coords[TIER3];
+    if(usedInter != dstNum) {
+      assert(coords[usedInter].coords[TIER1] == dst.coords[TIER1]);
+      interNode.coords[TIER1] = coords[usedInter].coords[TIER1];
+      interNode.coords[TIER2] = coords[usedInter].coords[TIER2];
+      interNode.coords[TIER3] = coords[usedInter].coords[TIER3];
       coordstoAriesRank(interNum, interNode);
+      assert(usedInter == interNum);
       addIntraPath(interNode, interNum, dst, dstNum, p, seed);
     }
 }
-
-#if !STATIC_ROUTING
-
-double *linkLoads, *pciLoads;
-
-#if DIRECT_ROUTING
-void model() {
-  memset(aries, 0, numAries*sizeof(Aries));
-  //initialize upper bounds
-  for(int i = 0; i < numAries; i++) {
-    aries[i].localRank = coords[i].coords[TIER2] * maxCoords.coords[TIER3] + coords[i].coords[TIER3];
-    for(int j = 0; j < BLUE_END; j++) {
-      if(j < GREEN_END) aries[i].linksB[j] = GREEN_BW/(myreal)NUM_ITERS;
-      else if(j < BLACK_END) aries[i].linksB[j] = BLACK_BW/(myreal)NUM_ITERS;
-      else aries[i].linksB[j] = BLUE_BW/(myreal)NUM_ITERS;
-    }
-    for(int j = 0; j < 4; j++) {
-      aries[i].pciSB[j] = PCI_BW/(myreal)NUM_ITERS;
-      aries[i].pciRB[j] = PCI_BW/(myreal)NUM_ITERS;
-    }
-  }
-
-  linkLoads = new double[numAries*BLUE_END];
-  pciLoads  = new double[numAries*8];
-
-  // intial set up
-  addPathsToMsgs();
-  markExpansionRequests();
-  updateMessageAndLinks();
-
-  bool expand = true;
-
-  int iter;
-  for(iter = 0; iter < MAX_ITERS && expand; iter++) {
-    expand = false;
-
-    unsigned long long linkCount = 0;
-    unsigned long long pciCount = 0;
-    for(int i = 0; i < numAries; i++) {
-      for(int j = 0; j < 4; j++) {
-        pciLoads[pciCount++] = aries[i].pciSB_t[j];
-        pciLoads[pciCount++] = aries[i].pciRB_t[j];
-      }
-      for(int j = 0; j < BLUE_END; j++) {
-        linkLoads[linkCount++] = aries[i].linksB_t[j];
-      }
-    }
-
-    MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-    MPI_Allreduce(MPI_IN_PLACE, pciLoads, numAries*8, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-
-    linkCount = 0;
-    pciCount = 0;
-    for(int i = 0; i < numAries; i++) {
-      for(int j = 0; j < 4; j++) {
-        aries[i].pciSB_t[j] = pciLoads[pciCount++];
-        aries[i].pciRB_t[j] = pciLoads[pciCount++];
-      }
-      for(int j = 0; j < BLUE_END; j++) {
-        aries[i].linksB_t[j] = linkLoads[linkCount++];
-      }
-    }
-
-    for(int i = 0; i < numAries; i++) {
-      for(int j = 0; j < 4; j++) {
-        aries[i].pciSB[j] -= aries[i].pciSB_t[j];
-        aries[i].pciRB[j] -= aries[i].pciRB_t[j];
-        aries[i].pciSB_t[j] = aries[i].pciSO[j] = 0;
-        aries[i].pciRB_t[j] = aries[i].pciRO[j] = 0;
-      }
-      for(int j = 0; j < BLUE_END; j++) {
-        aries[i].linksB[j] -= aries[i].linksB_t[j];
-        aries[i].linksB_t[j] = aries[i].linksO[j] = 0;
-      }
-    }
-
-    //add bandwidth incrementally
-    if(iter < NUM_ITERS) {
-      for(int i = 0; i < numAries; i++) {
-        for(int j = 0; j < BLUE_END; j++) {
-          if(j < GREEN_END) aries[i].linksB[j] += GREEN_BW/(myreal)NUM_ITERS;
-          else if(j < BLACK_END) aries[i].linksB[j] += BLACK_BW/(myreal)NUM_ITERS;
-          else aries[i].linksB[j] += BLUE_BW/(myreal)NUM_ITERS;
-        }
-        for(int j = 0; j < 4; j++) {
-          aries[i].pciSB[j] += PCI_BW/(myreal)NUM_ITERS;
-          aries[i].pciRB[j] += PCI_BW/(myreal)NUM_ITERS;
-        }
-      }
-    }
-    selectExpansionRequests(expand);
-    markExpansionRequests();
-    updateMessageAndLinks();
-    int expandl = (expand) ? 1 : 0;
-    int globale;
-    MPI_Allreduce(&expandl, &globale, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD);
-    expand = (globale > 0) ? true : false;
-  }
-
-  for(int i = 0; i < numAries; i++) {
-    for(int j = 0; j < 4; j++) {
-      aries[i].pciSO[j] = 0;
-      aries[i].pciRO[j] = 0;
-    }
-    for(int j = 0; j < BLUE_END; j++) {
-      aries[i].linksO[j] = 0;
-    }
-  }
-
-  if(!myRank)
-    printf("Number of iterations executed: %d\n", iter);
-  computeSummary();
-  printStats();
-}
-
-inline void updateMessageAndLinks() {
-  unsigned long long linkCount = 0;
-  unsigned long long pciCount = 0;
-  for(int i = 0; i < numAries; i++) {
-    for(int j = 0; j < 4; j++) {
-      pciLoads[pciCount++] = aries[i].pciSO[j];
-      pciLoads[pciCount++] = aries[i].pciRO[j];
-    }
-    for(int j = 0; j < BLUE_END; j++) {
-      linkLoads[linkCount++] = aries[i].linksO[j];
-    }
-  }
-
-  MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-  MPI_Allreduce(MPI_IN_PLACE, pciLoads, numAries*8, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-
-  linkCount = 0;
-  pciCount = 0;
-  for(int i = 0; i < numAries; i++) {
-    for(int j = 0; j < 4; j++) {
-      aries[i].pciSO[j] = pciLoads[pciCount++];
-      aries[i].pciRO[j] = pciLoads[pciCount++];
-    }
-    for(int j = 0; j < BLUE_END; j++) {
-      aries[i].linksO[j] = linkLoads[linkCount++];
-    }
-  }
-
-  for(size_t m = 0; m < msgsV.size(); m++) {
-    Msg &currmsg = msgsV[m];
-    for(size_t i = 0; i < currmsg.paths.size(); i++) {
-      if(currmsg.expand[i]) {
-        myreal min = FLT_MAX;
-        for(size_t j = 0; j < currmsg.paths[i].size(); j++) {
-          min = MIN(min, (currmsg.loads[i]/aries[currmsg.paths[i][j].aries].linksO[currmsg.paths[i][j].link])*aries[currmsg.paths[i][j].aries].linksB[currmsg.paths[i][j].link]);
-        }
-        min = MIN(min, (currmsg.loads[i]/aries[currmsg.src].pciSO[currmsg.srcPCI])*aries[currmsg.src].pciSB[currmsg.srcPCI]);
-        min = MIN(min, (currmsg.loads[i]/aries[currmsg.dst].pciRO[currmsg.dstPCI])*aries[currmsg.dst].pciRB[currmsg.dstPCI]);
-
-        for(size_t j = 0; j < currmsg.paths[i].size(); j++) {
-          aries[currmsg.paths[i][j].aries].linksB_t[currmsg.paths[i][j].link] += min;
-        }
-        aries[currmsg.src].pciSB_t[currmsg.srcPCI] += min;
-        aries[currmsg.dst].pciRB_t[currmsg.dstPCI] += min;
-        currmsg.bw +=  min;
-        currmsg.allocated[i] += min;
-      }
-    }
-  }
-}
-
-inline void computeSummary() {
-  for(size_t m = 0; m < msgsV.size(); m++) {
-    Msg &currmsg = msgsV[m];
-    aries[currmsg.src].pciSO[currmsg.srcPCI] += currmsg.bytes;
-    aries[currmsg.dst].pciRO[currmsg.dstPCI] += currmsg.bytes;
-    for(size_t i = 0; i < currmsg.paths.size(); i++) {
-      myreal pathLoad = currmsg.bytes*(currmsg.allocated[i]/currmsg.bw);
-      for(size_t j = 0; j < currmsg.paths[i].size(); j++) {
-        aries[currmsg.paths[i][j].aries].linksO[currmsg.paths[i][j].link] += pathLoad;
-      }
-    }
-  }
-  unsigned long long linkCount = 0;
-  unsigned long long pciCount = 0;
-  for(int i = 0; i < numAries; i++) {
-    for(int j = 0; j < 4; j++) {
-      pciLoads[pciCount++] = aries[i].pciSO[j];
-      pciLoads[pciCount++] = aries[i].pciRO[j];
-    }
-    for(int j = 0; j < BLUE_END; j++) {
-      linkLoads[linkCount++] = aries[i].linksO[j];
-    }
-  }
-
-  MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-  MPI_Allreduce(MPI_IN_PLACE, pciLoads, numAries*8, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-
-  linkCount = 0;
-  pciCount = 0;
-  for(int i = 0; i < numAries; i++) {
-    for(int j = 0; j < 4; j++) {
-      aries[i].pciSO[j] = pciLoads[pciCount++];
-      aries[i].pciRO[j] = pciLoads[pciCount++];
-    }
-    for(int j = 0; j < BLUE_END; j++) {
-      aries[i].linksO[j] = linkLoads[linkCount++];
-    }
-  }
-  if(myRank) {
-    MPI_Barrier(MPI_COMM_WORLD);
-    MPI_Finalize();
-    exit(0);
-  }
-}
-
-inline void addPathsToMsgs() {
-  for(size_t m = 0; m < msgsV.size(); m++) {
-    Msg &currmsg = msgsV[m];
-    Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
-
-    //in the same lowest tier - direct connection
-    if(src.coords[TIER1] == dst.coords[TIER1] && src.coords[TIER2] == dst.coords[TIER2]) {
-      currmsg.paths.resize(1);
-      currmsg.paths[0].resize(1);
-      currmsg.paths[0][0].aries = currmsg.src;
-      currmsg.paths[0][0].link = dst.coords[TIER3]; //GREEN
-      currmsg.expand.push_back(true);
-      currmsg.loads.push_back(currmsg.bytes);
-      currmsg.allocated.push_back(0.0);
-    } else if(src.coords[TIER1] == dst.coords[TIER1]) { //in the same second tier
-      if(src.coords[TIER3] == dst.coords[TIER3]) { //aligned on tier3 - direct connection
-        currmsg.paths.resize(1);
-        currmsg.paths[0].resize(1);
-        currmsg.paths[0][0].aries = currmsg.src;
-        currmsg.paths[0][0].link = BLACK_START + dst.coords[TIER2];
-        currmsg.expand.push_back(true);
-        currmsg.loads.push_back(currmsg.bytes);
-        currmsg.allocated.push_back(0.0);
-      } else {  // else two paths of length 2
-        currmsg.paths.resize(2);
-        addToPath(currmsg.paths, src, currmsg.src, dst, 0, 1);
-        currmsg.expand.resize(2, true);
-        currmsg.loads.resize(2, currmsg.bytes*0.5);
-        currmsg.allocated.resize(2, 0.0);
-      }
-    } else {
-      addFullPaths(currmsg.paths, src, currmsg.src, dst, currmsg.dst);
-      currmsg.expand.resize(currmsg.paths.size(), true);
-      currmsg.loads.resize(currmsg.paths.size(), currmsg.bytes*1.0/currmsg.paths.size());
-      currmsg.allocated.resize(currmsg.paths.size(), 0.0);
-    }
-  }
-}
-
-void addToPath(vector< Path > & paths, Coords src, int srcNum, Coords &dst, int loc1, int loc2) {
-  int interAries;
-  Hop h;
-  //first travel TIER3, then TIER2
-  h.aries = srcNum;
-  h.link = dst.coords[TIER3]; //GREEN
-  paths[loc1].push_back(h);
-  int back3 = src.coords[TIER3];
-  src.coords[TIER3] = dst.coords[TIER3];
-  coordstoAriesRank(interAries, src);
-  h.aries = interAries;
-  h.link = BLACK_START + dst.coords[TIER2];
-  paths[loc1].push_back(h);
-
-  //first travel TIER2, then TIER3
-  h.aries = srcNum;
-  h.link = BLACK_START + dst.coords[TIER2];
-  paths[loc2].push_back(h);
-  src.coords[TIER3] = back3;
-  src.coords[TIER2] = dst.coords[TIER2];
-  coordstoAriesRank(interAries, src);
-  h.aries = interAries;
-  h.link = dst.coords[TIER3];
-  paths[loc2].push_back(h);
-}
-
-void addFullPaths(vector< Path > & paths, Coords src, int srcNum, Coords &dst, int dstNum) {
-  int pathCount;
-  int localConnection = dst.coords[TIER1] % ariesPerGroup;
-  //find total number of paths
-  if(localConnection/maxCoords.coords[TIER3] == src.coords[TIER2] || localConnection % maxCoords.coords[TIER3] == src.coords[TIER3]) {
-    pathCount = 1;
-  } else {
-    pathCount = 2;
-  }
-  int remoteConnection = src.coords[TIER1] % ariesPerGroup;
-  if(remoteConnection/maxCoords.coords[TIER3] == dst.coords[TIER2] || remoteConnection % maxCoords.coords[TIER3] == dst.coords[TIER3]) {
-    pathCount *= 1;
-  } else {
-    pathCount *= 2;
-  }
-
-  paths.resize(pathCount);
-  Coords interNode; int interNum;
-  //add hops within the src group
-  if(localConnection == aries[srcNum].localRank) {
-    interNode = src;
-    interNum = srcNum;
-  } else {
-    interNode.coords[TIER1] = src.coords[TIER1];
-    interNode.coords[TIER2] = localConnection/maxCoords.coords[TIER3];
-    interNode.coords[TIER3] = localConnection % maxCoords.coords[TIER3];
-    coordstoAriesRank(interNum, interNode);
-    if(interNode.coords[TIER2] == src.coords[TIER2]) { //if use only 1 GREEN LINK
-      Hop h;
-      h.aries = srcNum;
-      h.link = interNode.coords[TIER3];
-      for(int i = 0; i < pathCount; i++) {
-        paths[i].push_back(h);
-      }
-    } else if(interNode.coords[TIER3] == src.coords[TIER3]) {
-      Hop h;
-      h.aries = srcNum;
-      h.link = BLACK_START + interNode.coords[TIER2];
-      for(int i = 0; i < pathCount; i++) {
-        paths[i].push_back(h);
-      }
-    } else {
-      for(int i = 0; i < pathCount/2; i++) {
-        addToPath(paths, src, srcNum, interNode, i, ((pathCount > 2) ? i + 2 : i + 1));
-      }
-    }
-  }
-
-  //add a BLUE connection to all paths
-  Hop h;
-  h.aries = interNum;
-  h.link = BLUE_START + dst.coords[TIER1]/ariesPerGroup;
-  for(int i = 0; i < pathCount; i++) {
-    paths[i].push_back(h);
-  }
-
-  //add hops within the dst group
-  if(remoteConnection != aries[dstNum].localRank) {
-    interNode.coords[TIER1] = dst.coords[TIER1];
-    interNode.coords[TIER2] = remoteConnection/maxCoords.coords[TIER3];
-    interNode.coords[TIER3] = remoteConnection % maxCoords.coords[TIER3];
-    coordstoAriesRank(interNum, interNode);
-    if(interNode.coords[TIER2] == dst.coords[TIER2]) { //if use only 1 GREEN LINK
-      Hop h;
-      h.aries = interNum;
-      h.link = dst.coords[TIER3]; //GREEN
-      for(int i = 0; i < pathCount; i++) {
-        paths[i].push_back(h);
-      }
-    } else if(interNode.coords[TIER3] == dst.coords[TIER3]) {
-      Hop h;
-      h.aries = interNum;
-      h.link = BLACK_START + dst.coords[TIER2];
-      for(int i = 0; i < pathCount; i++) {
-        paths[i].push_back(h);
-      }
-    } else {
-      for(int i = 0; i < pathCount; i += 2) {
-        addToPath(paths, interNode, interNum, dst, i, i+1);
-      }
-    }
-  }
-}
-#else
-
-int round;
 
 void model() {
 
@@ -1112,7 +811,8 @@ void model() {
     memset(aries, 0, numAries*sizeof(Aries));
     //initialize upper bounds
     for(int i = 0; i < numAries; i++) {
-      aries[i].localRank = coords[i].coords[TIER2] * maxCoords.coords[TIER3] + coords[i].coords[TIER3];
+      aries[i].localRank = coords[i].coords[TIER2] * maxCoords.coords[TIER3] +
+                           coords[i].coords[TIER3];
       for(int j = 0; j < BLUE_END; j++) {
         if(j < GREEN_END) aries[i].linksB[j] = GREEN_BW/(myreal)NUM_ITERS;
         else if(j < BLACK_END) aries[i].linksB[j] = BLACK_BW/(myreal)NUM_ITERS;
@@ -1133,7 +833,7 @@ void model() {
       currmsg.expand.clear();
       currmsg.loads.clear();
       currmsg.expand.resize(PATHS_PER_ITER, true);
-      currmsg.loads.resize(PATHS_PER_ITER, currmsg.bytes/PATHS_PER_ITER);
+      currmsg.loads.resize(PATHS_PER_ITER, currmsg.bytes*1.0/PATHS_PER_ITER);
     }
 
     markExpansionRequests();
@@ -1159,8 +859,10 @@ void model() {
         }
       }
 
-      MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-      MPI_Allreduce(MPI_IN_PLACE, pciLoads, numAries*8, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+      MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE,
+                    MPI_SUM, MPI_COMM_WORLD);
+      MPI_Allreduce(MPI_IN_PLACE, pciLoads, numAries*8, MPI_DOUBLE, MPI_SUM,
+                    MPI_COMM_WORLD);
 
       linkCount = 0;
       pciCount = 0;
@@ -1214,6 +916,7 @@ void model() {
       printf("Number of iterations executed: %d\n", iter);
   }
 
+  //copy to contiguous buffer and reduce across all nodes
   unsigned long long linkCount = 0;
   for(int i = 0; i < numAries; i++) {
     for(int j = 0; j < BLUE_END; j++) {
@@ -1221,7 +924,8 @@ void model() {
     }
   }
 
-  MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM,
+                MPI_COMM_WORLD);
 
   linkCount = 0;
   for(int i = 0; i < numAries; i++) {
@@ -1229,6 +933,18 @@ void model() {
       aries[i].linksO[j] = linkLoads[linkCount++];
     }
   }
+
+#if JOB_SPECIFIC_TRAFFIC
+  for(int job = 0; job < num_jobs; job++) {
+    if(myRank == 0) {
+      MPI_Reduce(MPI_IN_PLACE, jobLinkLoads[job], numAries*BLUE_END,
+          MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    } else {
+      MPI_Reduce(jobLinkLoads[job], jobLinkLoads[job], numAries*BLUE_END,
+          MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    }
+  }
+#endif
 
   if(myRank) {
     MPI_Barrier(MPI_COMM_WORLD);
@@ -1240,12 +956,36 @@ void model() {
 }
 
 inline void addPathsToMsgs() {
+  int indirect = 2;
   for(size_t m = 0; m < msgsV.size(); m++) {
     Msg &currmsg = msgsV[m];
     Coords &src = coords[currmsg.src], &dst = coords[currmsg.dst];
     currmsg.paths.clear();
     currmsg.paths.resize(PATHS_PER_ITER);
-    for(int i = 0; i < PATHS_PER_ITER; i++) {
+    // add 2 direct paths
+    for(int i = 0; i < 2; i++) {
+      getDirectPath(src, currmsg.src, dst, currmsg.dst, currmsg.paths[i]);
+    };
+#if NO_PATH_REPITITION
+    int compare = 1;
+    if(currmsg.paths[0].size() != currmsg.paths[1].size()) compare = 0;
+    if(compare) {
+      for(int i = 0; i < currmsg.paths[0].size(); i++) {
+        if((currmsg.paths[0][i].aries != currmsg.paths[1][i].aries) ||
+           (currmsg.paths[0][i].link != currmsg.paths[1][i].link)) {
+          compare = 0;
+          break;
+        }
+      }
+      if(compare) {
+        currmsg.paths.resize(1);
+        currmsg.paths.resize(PATHS_PER_ITER);
+        indirect = 1;
+      }
+    }
+#endif
+    //add rest from indirect paths
+    for(int i = indirect; i < PATHS_PER_ITER; i++) {
       getRandomPath(src, currmsg.src, dst, currmsg.dst, currmsg.paths[i]);
     }
   }
@@ -1264,8 +1004,10 @@ inline void updateMessageAndLinks() {
     }
   }
 
-  MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-  MPI_Allreduce(MPI_IN_PLACE, pciLoads, numAries*8, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, linkLoads, numAries*BLUE_END, MPI_DOUBLE, MPI_SUM,
+                MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, pciLoads, numAries*8, MPI_DOUBLE, MPI_SUM,
+                MPI_COMM_WORLD);
 
   linkCount = 0;
   pciCount = 0;
@@ -1287,7 +1029,8 @@ inline void updateMessageAndLinks() {
         for(int j = 0; j < currmsg.paths[i].size(); j++) {
           min = MIN(min, (currmsg.loads[i]/aries[currmsg.paths[i][j].aries].linksO[currmsg.paths[i][j].link])*aries[currmsg.paths[i][j].aries].linksB[currmsg.paths[i][j].link]);
         }
-        min = MIN(min, (currmsg.loads[i]/aries[currmsg.src].pciSO[currmsg.srcPCI])*aries[currmsg.src].pciSB[currmsg.srcPCI]);
+        min = MIN(min, (currmsg.loads[i]/aries[currmsg.src].pciSO[currmsg.srcPCI])
+                       *aries[currmsg.src].pciSB[currmsg.srcPCI]);
         min = MIN(min, (currmsg.loads[i]/aries[currmsg.dst].pciRO[currmsg.dstPCI])*aries[currmsg.dst].pciRB[currmsg.dstPCI]);
 
         for(size_t j = 0; j < currmsg.paths[i].size(); j++) {
@@ -1302,14 +1045,17 @@ inline void updateMessageAndLinks() {
           myreal pathLoad = currmsg.bytes*(min/currmsg.bw);
           for(size_t j = 0; j < currmsg.paths[i].size(); j++) {
             aries[currmsg.paths[i][j].aries].linksSum[currmsg.paths[i][j].link] += pathLoad;
+#if JOB_SPECIFIC_TRAFFIC
+            int link_off = currmsg.paths[i][j].aries * BLUE_END;
+            link_off += currmsg.paths[i][j].link;
+            jobLinkLoads[currmsg.jobID][link_off] += pathLoad;
+#endif
           }
         }
       }
     }
   }
 }
-
-#endif // !DIRECT_ROUTING
 
 inline void markExpansionRequests() {
   //mark all links
@@ -1330,7 +1076,8 @@ inline void markExpansionRequests() {
 void selectExpansionRequests(bool & expand) {
   for(size_t m = 0; m < msgsV.size(); m++) {
     Msg &currmsg = msgsV[m];
-    if(aries[currmsg.src].pciSB[currmsg.srcPCI] < CUTOFF_BW || aries[currmsg.dst].pciRB[currmsg.dstPCI] < CUTOFF_BW) {
+    if(aries[currmsg.src].pciSB[currmsg.srcPCI] < CUTOFF_BW ||
+       aries[currmsg.dst].pciRB[currmsg.dstPCI] < CUTOFF_BW) {
       for(int i = 0; i < currmsg.paths.size(); i++) {
         currmsg.expand[i] = false;
       }
@@ -1342,7 +1089,8 @@ void selectExpansionRequests(bool & expand) {
     for(size_t i = 0; i < currmsg.paths.size(); i++) {
       currmsg.loads[i] = FLT_MAX;
       for(int j = 0; j < currmsg.paths[i].size(); j++) {
-        currmsg.loads[i] = MIN(currmsg.loads[i], aries[currmsg.paths[i][j].aries].linksB[currmsg.paths[i][j].link]);
+        currmsg.loads[i] = MIN(currmsg.loads[i],
+        aries[currmsg.paths[i][j].aries].linksB[currmsg.paths[i][j].link]);
       }
       sum += currmsg.loads[i];
     }
@@ -1358,4 +1106,3 @@ void selectExpansionRequests(bool & expand) {
     }
   }
 }
-#endif // !STATIC ROUTING
