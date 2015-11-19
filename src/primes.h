@@ -1,3 +1,19 @@
+//////////////////////////////////////////////////////////////////////////////
+// Copyright (c) 2014, Lawrence Livermore National Security, LLC.
+// Produced at the Lawrence Livermore National Laboratory.
+//
+// Written by:
+//     Nikhil Jain <nikhil.jain@acm.org>
+//     Abhinav Bhatele <bhatele@llnl.gov>
+//     Peer-Timo Bremer <ptbremer@llnl.gov>
+//
+// LLNL-CODE-678961. All rights reserved.
+//
+// This file is part of Damselfly. For details, see:
+// https://github.com/scalability-llnl/damselfly
+// Please also read the LICENSE file for our notice and the LGPL.
+//////////////////////////////////////////////////////////////////////////////
+
 int primes[] =  { 2,3,5,7,11,13,17,19,23,
 29,31,37,41,43,47,53,59,61,
 67,71,73,79,83,89,97,101,103,
