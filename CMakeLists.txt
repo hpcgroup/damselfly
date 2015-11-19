@@ -18,4 +18,7 @@ configure_file (
       "${PROJECT_BINARY_DIR}/Config.h"
 )
 
+set(CMAKE_C_COMPILER mpicc)
+set(CMAKE_CXX_COMPILER mpicxx)
+
 add_executable(damselfly src/ariesModeling.C)
