@@ -1,5 +1,21 @@
-cmake_minimum_required(VERSION 2.6)
+##############################################################################
+# Copyright (c) 2014, Lawrence Livermore National Security, LLC.
+# Produced at the Lawrence Livermore National Laboratory.
+#
+# Written by:
+#     Nikhil Jain <nikhil.jain@acm.org>
+#     Abhinav Bhatele <bhatele@llnl.gov>
+#     Peer-Timo Bremer <ptbremer@llnl.gov>
+#
+# LLNL-CODE-678961. All rights reserved.
+#
+# This file is part of Damselfly. For details, see:
+# https://github.com/scalability-llnl/damselfly
+# Please also read the LICENSE file for our notice and the LGPL.
+##############################################################################
+
 project(damselfly)
+cmake_minimum_required(VERSION 2.6)
 
 include_directories("${PROJECT_BINARY_DIR}")
 
@@ -22,3 +38,5 @@ set(CMAKE_C_COMPILER mpicc)
 set(CMAKE_CXX_COMPILER mpicxx)
 
 add_executable(damselfly src/ariesModeling.C)
+
+install(TARGETS damselfly DESTINATION bin)
