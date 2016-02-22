@@ -12,7 +12,7 @@
 # LLNL-CODE-678961. All rights reserved.
 #
 # This file is part of Damselfly. For details, see:
-# https://github.com/scalability-llnl/damselfly
+# https://github.com/LLNL/damselfly
 # Please also read the LICENSE file for our notice and the LGPL.
 ##############################################################################
 
