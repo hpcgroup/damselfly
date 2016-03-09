@@ -19,13 +19,13 @@ make
 
 Sample cmake command for Blue Gene/Q:
 ```bash
-    cmake -DCMAKE_C_COMPILER=mpixlc_r -DCMAKE_CXX_COMPILER=mpixlcxx_r -DCMAKE_BUILD_TYPE=Release -DJOB_TRAFFIC=ON ..
+cmake -DCMAKE_C_COMPILER=mpixlc_r -DCMAKE_CXX_COMPILER=mpixlcxx_r -DCMAKE_BUILD_TYPE=Release -DJOB_TRAFFIC=ON ..
 ```
 
 ### Run
 
 ```
-    mpirun -np 8 ./damselfly conffile map_file out_file
+mpirun -np 8 ./damselfly conffile map_file out_file
 ```
 where:
 * conffile - configuration file (format described below)
