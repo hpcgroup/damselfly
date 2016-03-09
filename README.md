@@ -47,7 +47,7 @@ Code for generating sample connection files are in the utils directory.
 
 ### Reference
 
-Any published work which utilizes this API should include the following
+Any published work that utilizes this software should include the following
 reference:
 
 ```
